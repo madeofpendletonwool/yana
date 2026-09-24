@@ -9,3 +9,4 @@ testdata/fuzz/
 /notes/
 web/dist/*
 !web/dist/.gitkeep
+android/crdt/libs/

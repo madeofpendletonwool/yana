@@ -256,6 +256,7 @@ make build      # embed it and build ./yana
 make test       # go test ./... and the web typecheck
 make lint       # gofmt and go vet
 make docker     # build the image locally
+make android-crdt  # build the Android CRDT AAR into android/crdt/libs
 ```
 
 One Go binary with the web client embedded. `cmd/yana` is the entry
@@ -263,7 +264,9 @@ point; `internal/` holds the server (`pathsafe` is the only way a string
 becomes a filesystem path, `reconcile` keeps documents, files and the
 index in step, `rt` is the realtime relay, `mcp` the agent endpoint,
 `git` the history layer, `guide` the starter notes); `web/` is the Preact
-and CodeMirror client; `spike/crdt/` is the CRDT evaluation harness the
+and CodeMirror client; `mobile/crdt` is the bind package behind the
+Android client's CRDT engine ([mobile/crdt/README.md](mobile/crdt/README.md));
+`spike/crdt/` is the CRDT evaluation harness the
 design started from.
 
 The reconciliation tests include a 60 second oscillation check and a
