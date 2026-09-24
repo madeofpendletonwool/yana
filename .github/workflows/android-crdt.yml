@@ -29,10 +29,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
-      - run: sdkmanager --install "ndk;${ANDROID_NDK_VERSION}"
-        env:
-          ANDROID_NDK_VERSION: 29.0.14206865 # keep in step with the Makefile
+      # The runner image ships the SDK and cmdline-tools; only the NDK
+      # is installed here, at the version the Makefile pins.
+      - run: yes | sdkmanager --licenses >/dev/null || true
+      - run: sdkmanager --install "ndk;29.0.14206865"
       - run: make android-crdt
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/29.0.14206865
