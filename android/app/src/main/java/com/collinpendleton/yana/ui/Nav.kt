@@ -13,6 +13,7 @@ import androidx.navigation.toRoute
 import com.collinpendleton.yana.YanaApp
 import com.collinpendleton.yana.data.normalizeServerUrl
 import com.collinpendleton.yana.ui.screens.NoteScreen
+import com.collinpendleton.yana.ui.screens.SearchScreen
 import com.collinpendleton.yana.ui.screens.ServerScreen
 import com.collinpendleton.yana.ui.screens.SettingsScreen
 import com.collinpendleton.yana.ui.screens.SignInScreen
@@ -25,6 +26,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object SpacesRoute
 @Serializable data class SpaceRoute(val name: String, val label: String)
 @Serializable data class NoteRoute(val id: String, val title: String)
+@Serializable data object SearchRoute
 @Serializable data object SettingsRoute
 
 @Composable
@@ -59,15 +61,16 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
         }
         composable<SpacesRoute> {
             SpacesScreen(
-                client = client,
+                repo = app.repo,
                 onSpace = { nav.navigate(SpaceRoute(it.name, it.displayName)) },
+                onSearch = { nav.navigate(SearchRoute) },
                 onSettings = { nav.navigate(SettingsRoute) },
             )
         }
         composable<SpaceRoute> { entry ->
             val r = entry.toRoute<SpaceRoute>()
             SpaceScreen(
-                client = client,
+                repo = app.repo,
                 space = r.name,
                 label = r.label,
                 onBack = { nav.popBackStack() },
@@ -76,7 +79,14 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
         }
         composable<NoteRoute> { entry ->
             val r = entry.toRoute<NoteRoute>()
-            NoteScreen(client = client, id = r.id, title = r.title, onBack = { nav.popBackStack() })
+            NoteScreen(repo = app.repo, id = r.id, title = r.title, onBack = { nav.popBackStack() })
+        }
+        composable<SearchRoute> {
+            SearchScreen(
+                repo = app.repo,
+                onBack = { nav.popBackStack() },
+                onNote = { id, title -> nav.navigate(NoteRoute(id, title)) },
+            )
         }
         composable<SettingsRoute> {
             SettingsScreen(app = app, onBack = { nav.popBackStack() })

@@ -20,9 +20,14 @@ data class Loaded<T>(
 
 /**
  * Loads once when created and again on pull-to-refresh, keeping the last
- * good data on screen while a refresh runs or fails.
+ * good data on screen while a refresh runs or fails. The first load and
+ * a refresh can read differently — the replica answers the first (so the
+ * screen works offline) while a refresh goes to the server.
  */
-class Loader<T>(private val fetch: suspend () -> T) : ViewModel() {
+class Loader<T>(
+    private val fetch: suspend () -> T,
+    private val refetch: (suspend () -> T)? = null,
+) : ViewModel() {
     private val state = MutableStateFlow(Loaded<T>())
     val loaded: StateFlow<Loaded<T>> = state.asStateFlow()
     private var job: Job? = null
@@ -36,7 +41,8 @@ class Loader<T>(private val fetch: suspend () -> T) : ViewModel() {
         state.value = state.value.copy(loading = state.value.data == null, refreshing = pull, error = null)
         job = viewModelScope.launch {
             state.value = try {
-                Loaded(data = fetch(), loading = false)
+                val data = if (pull) (refetch?.invoke() ?: fetch()) else fetch()
+                Loaded(data = data, loading = false)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -112,6 +112,60 @@ data class Note(
 @Serializable
 data class SessionsResponse(val sessions: List<SessionInfo> = emptyList())
 
+/**
+ * One note's metadata: the full row the search and list endpoints
+ * return, tags included. This is what the offline replica caches for
+ * every visible note.
+ */
+@Serializable
+data class NoteMeta(
+    val id: String,
+    val space: String = "",
+    val path: String,
+    val title: String = "",
+    val preview: String = "",
+    val kind: String = "md",
+    @SerialName("content_hash") val contentHash: String = "",
+    val size: Long = 0,
+    val mtime: String = "",
+    val created: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
+    val order: Int? = null,
+    val trusted: Boolean = false,
+    @SerialName("conflict_of") val conflictOf: String? = null,
+    val tags: List<String> = emptyList(),
+)
+
+/** The flat note list the replica syncs from. */
+@Serializable
+data class NotesResponse(val notes: List<NoteMeta> = emptyList())
+
+/** One full-text result, the same shape online and offline. */
+@Serializable
+data class SearchHit(
+    val note: NoteMeta,
+    val snippet: String = "",
+    val rank: Double = 0.0,
+)
+
+@Serializable
+data class SearchResponse(
+    val mode: String = "fts",
+    val hits: List<SearchHit> = emptyList(),
+)
+
+@Serializable
+data class CreateNoteRequest(val path: String, val content: String)
+
+@Serializable
+data class CreateNoteResponse(val id: String = "", val path: String = "")
+
+@Serializable
+data class MoveRequest(val path: String)
+
+@Serializable
+data class SourceSave(val source: String, @SerialName("base_hash") val baseHash: String = "")
+
 @Serializable
 data class SessionInfo(
     val id: String,

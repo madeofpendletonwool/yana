@@ -40,9 +40,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.collinpendleton.yana.data.NoteRepository
 import com.collinpendleton.yana.data.TreeNode
 import com.collinpendleton.yana.data.TreeRow
-import com.collinpendleton.yana.data.YanaClient
 import com.collinpendleton.yana.data.noteCount
 import com.collinpendleton.yana.data.visibleRows
 import com.collinpendleton.yana.ui.Loader
@@ -52,18 +52,18 @@ import com.collinpendleton.yana.ui.Placeholder
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SpaceScreen(
-    client: YanaClient,
+    repo: NoteRepository,
     space: String,
     label: String,
     onBack: () -> Unit,
     onNote: (id: String, title: String) -> Unit,
 ) {
+    // The replica answers if the network cannot; pull-to-refresh syncs.
     val vm: Loader<List<TreeNode>> = viewModel(key = "space:$space") {
-        Loader {
-            // The root ("") has no directory to filter on: take it from the full tree.
-            val tree = client.api().tree(space.ifEmpty { null }).spaces
-            tree.firstOrNull { it.name == space }?.children ?: emptyList()
-        }
+        Loader(
+            fetch = { repo.tree(space) },
+            refetch = { repo.sync(); repo.tree(space) },
+        )
     }
     val state by vm.loaded.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf(setOf<String>()) }

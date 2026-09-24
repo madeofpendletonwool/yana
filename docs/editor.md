@@ -680,6 +680,7 @@ of its own like any other file.
 | `GET /api/conflicts/{id}/diff` | A unified diff between one copy and its survivor |
 | `POST /api/conflicts/{id}/resolve` | `{action: mine, theirs, or both}` settles one copy |
 | `GET /api/search/regex?raw=` | The regex search over the files; `path:` and `space:` terms in `raw` narrow where it runs |
+| `GET /api/notes` | Every visible note as a flat list with metadata and tags (`?space=` to take one space); what the Android replica syncs from |
 
 `GET /api/tree` lists empty directories as well as the notes, each
 note row carries its `tags`, and a conflict copy nests under the note

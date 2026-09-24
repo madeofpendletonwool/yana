@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.collinpendleton.yana.data.Note
-import com.collinpendleton.yana.data.YanaClient
+import com.collinpendleton.yana.data.NoteRepository
 import com.collinpendleton.yana.data.stripFrontmatter
 import com.collinpendleton.yana.ui.Loader
 import com.collinpendleton.yana.ui.Placeholder
@@ -41,13 +41,14 @@ import com.collinpendleton.yana.ui.formatTime
 
 /**
  * A note, read-only: its title, where it lives, its tags, and its text as
- * written. Editing arrives with the editor; until then the body is the
+ * written — from the server, or from the replica when the server is out
+ * of reach. Editing arrives with the editor; until then the body is the
  * markdown source, selectable for copying.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NoteScreen(client: YanaClient, id: String, title: String, onBack: () -> Unit) {
-    val vm: Loader<Note> = viewModel(key = "note:$id") { Loader { client.api().note(id) } }
+fun NoteScreen(repo: NoteRepository, id: String, title: String, onBack: () -> Unit) {
+    val vm: Loader<Note> = viewModel(key = "note:$id") { Loader(fetch = { repo.note(id) }) }
     val state by vm.loaded.collectAsStateWithLifecycle()
     val note = state.data
 
