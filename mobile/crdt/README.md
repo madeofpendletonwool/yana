@@ -16,7 +16,8 @@ make android-crdt
 ```
 
 The AAR lands at `android/crdt/libs/yana-crdt.aar`, where the Android
-project's `crdt` module picks it up (`files("libs/yana-crdt.aar")`). It
+project's `:crdt` project publishes it to the app
+([android/README.md](../../android/README.md#the-crdt-engine)). It
 is a build artifact: not committed, rebuilt by `make android-crdt` and by
 CI, which uploads it as a workflow artifact on every pull request that
 touches `mobile/`.

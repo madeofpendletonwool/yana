@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- The Android app's first build, under `android/`: Kotlin, Compose and
+  Material 3 in the Identity palette and type, light and dark, with a
+  launcher icon cut from the wordmark's slash. It connects to a server
+  by address, creates the owner account when the server has none, and
+  signs in with a password; the token pair lives in
+  EncryptedSharedPreferences and refreshes silently, across restarts.
+  The session carries the device's name, so it shows on the web's
+  Account page, and revoking it there signs the phone out on its next
+  request. It browses spaces, each space's folder tree, and notes
+  (read-only for now), and settings holds sign-out, the theme, and the
+  about page. CI builds, lints and unit-tests it on every pull request
+  that touches `android/` and attaches the debug APK.
+
 - The Android CRDT engine. `mobile/crdt` is the bind package over the
   Go Yjs port: create, edit, and diff-apply a note's body; apply and
   encode updates; snapshot and compact; an undo manager scoped to the
