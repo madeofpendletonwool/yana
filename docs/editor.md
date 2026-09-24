@@ -15,12 +15,14 @@ One component tree, three layouts, picked by width:
 | 720 to 1023px | Tablet. The drawer stays; the top bar has room for New and Today. The tab strip sits above the note. Read, Edit and Split are all available. |
 | 1024px and up | Desktop. The sidebar is a column that collapses from the top-left button; the tab strip sits above the note; Split puts the editor beside the render; the content area splits into two panes. |
 
-The sidebar holds search (full text, or a regular expression with the `.*`
-switch when the server has ripgrep), the tree, and the links to the tag
-index, the unresolved-link report, the trash, and settings. Search
-results replace the tree while a query is typed. A space you belong to
-shows in the tree even before it holds a note, with the `+` to start one,
-and so does a folder that holds no note yet.
+The sidebar holds search (full text with operators — `tag:`, `path:`,
+`space:`, `is:`, `has:`, `author:`, `before:`, `after:`, a `-` to
+exclude, quotes for a phrase — or a regular expression with the `.*`
+switch when the server has ripgrep), the tree, the saved searches, and
+the links to the tag index, the unresolved-link report, the trash, and
+settings. Search results replace the tree while a query is typed. A
+space you belong to shows in the tree even before it holds a note, with
+the `+` to start one, and so does a folder that holds no note yet.
 
 Spaces and folders open and close from their row; the space header is
 the toggle, with the note count beside the name. Folders start closed
@@ -310,12 +312,64 @@ Folders are real directories, so the actions are file operations:
 ## Search on a phone
 
 On a phone, Search in the bottom bar (or `/`) opens a page of its own:
-the box at the top with the keyboard up, the queries typed before it
-underneath until something is typed, results after that. Recent queries
-are kept per browser (`yana.queries`, the last eight). A result opens
-the note in read mode with the matched text scrolled into view and
-marked; the mark stays while reading and clears on entering the editor.
-Wider screens keep search in the sidebar and open results the same way.
+the box at the top with the keyboard up, the operator list and the
+queries typed before it underneath until something is typed, results
+after that. Recent queries are kept per browser (`yana.queries`, the
+last eight). A result opens the note in read mode with the matched text
+scrolled into view and marked; the mark stays while reading and clears
+on entering the editor. Wider screens keep search in the sidebar and
+open results the same way.
+
+## Search operators
+
+The search box takes plain full text (titles and bodies, and the text
+inside PDFs), and a small set of operators that turn it into a tool. A
+term is an operator when it starts with one of these names and a colon;
+anything else is searched as text — an unknown operator like `foo:bar`
+is searched, never rejected. A `-` in front of a term excludes it, and
+double quotes make an exact phrase.
+
+| Term | What it matches |
+|---|---|
+| `tag:home` (or `#home`) | notes carrying that tag |
+| `path:folder/` | notes under a folder (or at a path, without the extension) |
+| `space:work` | one space |
+| `is:untagged` | notes with no tags |
+| `is:task` | notes with an open task |
+| `is:html` | HTML notes |
+| `has:image` | notes that reference an image in `_assets/` |
+| `has:attachment` | notes that reference any file in `_assets/` |
+| `author:claude` | notes whose last edit was made by that person or agent |
+| `before:2026-01-01` | modified before a day |
+| `after:2026-01-01` | modified since a day |
+| `-tag:done` | the minus excludes what follows |
+| `"water heater"` | the words together, in order |
+
+Operators combine with text and with each other:
+`tag:home -tag:done "water heater" after:2026-01-01` is every note
+tagged home, not tagged done, containing that phrase, modified since
+that day. A query of operators alone (`is:untagged path:home/`) lists
+what survives the filters, newest edit first. A date that is not
+`YYYY-MM-DD` is searched as text.
+
+The grammar is parsed in one place on the client
+(`web/src/opsearch.ts`) and one on the server (`internal/search/
+query.go`) with the same rules; the server maps the terms onto the
+index as SQL filters around the full-text match
+(`GET /api/search?q=…`). While typing, the search box and the switcher
+highlight recognised operators as chips and offer completions after
+`tag:`, `path:`, `space:`, `is:` and `has:` — the tags, folders and
+spaces that exist. The switcher applies the operators the tree can
+answer (`tag:`, `path:`, `space:`, `is:untagged`, `is:html`); the rest
+belong to the search box. The regex search (`.* `, `GET
+/api/search/regex?raw=…`) accepts only `path:` and `space:`, which
+narrow where the pattern runs; everything else in the box is the
+pattern.
+
+A query worth keeping is saved under a name (Save this search, beside
+the results) and pinned to the sidebar under the search box. Saved
+searches are a preference of the browser like pins
+(`yana.searches.saved` in `localStorage`), never files in the tree.
 
 ## Title
 
@@ -625,6 +679,7 @@ of its own like any other file.
 | `GET /api/notes/{id}/conflicts` | The conflict copies behind one note, for its chip |
 | `GET /api/conflicts/{id}/diff` | A unified diff between one copy and its survivor |
 | `POST /api/conflicts/{id}/resolve` | `{action: mine, theirs, or both}` settles one copy |
+| `GET /api/search/regex?raw=` | The regex search over the files; `path:` and `space:` terms in `raw` narrow where it runs |
 
 `GET /api/tree` lists empty directories as well as the notes, each
 note row carries its `tags`, and a conflict copy nests under the note

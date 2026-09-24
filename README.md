@@ -71,9 +71,13 @@ sits above the keyboard.
 
 ![Three phone screens: the home screen with New note, Capture and Today; a note being read with its task boxes; the same note in the editor with the formatting bar above the keyboard](images/screenshots/phone.png)
 
-**Finding things.** Full-text search over titles and bodies, regex search
+**Finding things.** Full-text search over titles and bodies with
+operators — `tag:`, `path:`, `space:`, `is:untagged`, `is:task`,
+`is:html`, `has:image`, `has:attachment`, `author:`, `before:`, `after:`,
+a `-` to exclude and quotes for a phrase — plus regex search
 over the files (with ripgrep), a switcher that opens a note by name or
-tag, recents and pins on the home screen, and a command palette that
+tag, recents and pins on the home screen, saved searches pinned to the
+sidebar, and a command palette that
 lists everything the app can do. A PDF dropped into a note is searched
 too — its text, extracted in the background, turns up alongside notes.
 
@@ -283,7 +287,7 @@ merges to `main` publish the image.
 ## Roadmap
 
 Planned next, roughly in order: importers for markdown vaults and Notion
-exports; search operators; templates with variables; vim keys; and an
+exports; templates with variables; vim keys; and an
 Android app.
 
 ## License

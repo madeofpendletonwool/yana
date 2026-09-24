@@ -36,6 +36,9 @@ import { NotePage } from './note'
 import * as outbox from './outbox'
 import { NewNotePicker, freeName, noteFile } from './newnote'
 import type { CreateHow, NewNoteSpec } from './newnote'
+import { OperatorInput } from './opsinput'
+import type { CompletionSource } from './opsearch'
+import { noteMatches, parseQuery } from './opsearch'
 import { Palette } from './palette'
 import type { PaletteItem, PaletteSpec } from './palette'
 import { resolveDir } from './paths'
@@ -192,6 +195,7 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
   const [treeEdit, setTreeEdit] = useState<TreeEdit | null>(null) // a folder input open in the tree
   const [themePref, setThemePref] = useState(prefs.theme)
   const [pinList, setPinList] = useState(prefs.pins)
+  const [savedList, setSavedList] = useState(prefs.savedSearches)
   const [rev, setRev] = useState(0) // bumps to reopen the current note after a move
   // A search hit opens with its match scrolled into view, and a task
   // row with its box; the sequence remounts the page so a second one on
@@ -382,6 +386,7 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
         setOpenPref(prefs.openMode())
         setLive(prefs.livePreview())
         setPinList(prefs.pins())
+        setSavedList(prefs.savedSearches())
       }),
     [],
   )
@@ -481,6 +486,16 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
   const notes = useMemo(() => flatten(spaces ?? []), [spaces])
   const byId = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes])
   const dirs = useMemo(() => folders(spaces ?? []), [spaces])
+  // What the operator completions offer: the tags, folders and spaces
+  // the tree knows, straight from the last tree load.
+  const searchSource = useMemo<CompletionSource>(
+    () => ({
+      tags: [...new Set(notes.flatMap((n) => n.tags))].sort((a, b) => a.localeCompare(b)),
+      folders: dirs.map((d) => d.path),
+      spaces: (spaces ?? []).map((s) => s.name),
+    }),
+    [notes, dirs, spaces],
+  )
   // A tab whose note the tree no longer has — deleted, trashed, or in a
   // space this account lost — is greyed, and closes when it is picked.
   // Only a tree fresh from the server says so.
@@ -1355,6 +1370,7 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
 
   function openSwitcher(): void {
     const recent = new Set(prefs.recents())
+    const byItemId = new Map(notes.map((n) => [n.id, n]))
     const items = notes.map((n) => ({
       id: n.id,
       label: n.title,
@@ -1366,11 +1382,59 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
       mode: 'list',
       placeholder: 'Open a note, or type #tag',
       items,
+      operators: searchSource,
+      // Operators the tree can evaluate filter the rows (tag:, path:,
+      // space:, is:untagged, is:html); the rest is fuzzy text as ever.
+      operatorFilter: (q) => {
+        const terms = parseQuery(q)
+        if (!terms.some((t) => t.op)) return null
+        const text = terms.filter((t) => !t.op).map((t) => t.text).join(' ')
+        return {
+          text,
+          keep: (item) => {
+            const n = byItemId.get(item.id)
+            return n !== undefined && noteMatches(terms, n)
+          },
+        }
+      },
       onCreate: (q) => {
         const sp = defaultSpace()
         void createNote(q.includes('/') || !sp ? q : `${sp}/${q}`)
       },
     })
+  }
+
+  // A saved search: the query pinned to the sidebar under a name.
+  function saveSearchPrompt(forQuery: string): void {
+    const q = forQuery.trim()
+    if (!q) return
+    setPalette({
+      mode: 'prompt',
+      placeholder: 'Name this search',
+      initial: '',
+      hint: `Pinned to the sidebar. Runs: ${q}`,
+      onSubmit: (name) => {
+        prefs.saveSearch(name, q)
+        say(`Saved "${name.trim()}" to the sidebar.`)
+      },
+    })
+  }
+
+  function runSavedSearch(q: string): void {
+    setRegex(false)
+    setQuery(q)
+    if (layout === 'phone') {
+      if (location.pathname !== '/search') history.pushState({ tab: null }, '', '/search')
+      setPhoneSearch(true)
+      setDrawer(false)
+    } else {
+      window.setTimeout(() => {
+        const el = searchInput.current
+        if (!el) return
+        el.focus()
+        el.select()
+      }, 0)
+    }
   }
 
   // Exports are downloads the token has to travel with, so they run
@@ -1401,6 +1465,7 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
       ['Tag a note', '#word anywhere in it', 'Tags'],
       ['Write something down fast', 'Capture, into today\'s note', 'Today and capture'],
       ['Find a note again', 'search, the switcher, tags, recents', 'Finding things'],
+      ['Narrow a search', 'tag:, path:, space:, is:, has:, author:, before:, after:', 'Finding things'],
       ['Move a note or make a folder', 'drag in the sidebar, or Move in the menu', 'Folders and moving'],
       ['See what changed, or bring a note back', 'Details, and the trash', 'History'],
       ['Share a space with someone', 'People and Spaces in settings', 'Sharing a space'],
@@ -1884,7 +1949,7 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
   if (layout === 'phone' && route.kind === 'search') {
     return (
       <div class={shellClass}>
-        <SearchPage status={status} onOpen={openHit} onClose={() => history.back()} />
+        <SearchPage status={status} source={searchSource} onOpen={openHit} onClose={() => history.back()} onSave={saveSearchPrompt} />
         {toast && <ToastView toast={toast} onClose={() => setToast(null)} />}
       </div>
     )
@@ -1955,18 +2020,15 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
         <aside class="sidebar" aria-label="notes" aria-hidden={!sidebarShown}>
           <div class="sidebar-search">
             <Icon name="search" class="sidebar-search-icon" />
-            <input
-              ref={searchInput}
-              type="search"
-              class="search-input"
+            <OperatorInput
+              query={query}
+              onQuery={setQuery}
+              source={searchSource}
               placeholder="Search notes"
-              autocomplete="off"
-              spellcheck={false}
-              aria-label="Search notes"
-              value={query}
+              ariaLabel="Search notes"
+              inputRef={searchInput}
               onFocus={() => { if (layout === 'phone') focusSearch() }}
-              onInput={(ev) => setQuery((ev.target as HTMLInputElement).value)}
-              onKeyDown={(ev) => {
+              onKey={(ev) => {
                 if (ev.key === 'Escape') {
                   setQuery('')
                   ;(ev.target as HTMLInputElement).blur()
@@ -1978,7 +2040,7 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
               class={'regex-btn' + (regex ? ' on' : '')}
               disabled={status ? !status.regex_search : false}
               aria-pressed={regex}
-              title={status && !status.regex_search ? 'Regex search needs ripgrep on the server.' : 'Match a regular expression against the files'}
+              title={status && !status.regex_search ? 'Regex search needs ripgrep on the server.' : 'Match a regular expression against the files; path: and space: narrow it'}
               onClick={() => setRegex((r) => !r)}
             >
               .*
@@ -1986,8 +2048,33 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
           </div>
           <div class="sidebar-scroll">
             {searching ? (
-              <SearchResults query={query} regex={regex} onOpen={openHit} />
+              <>
+                {!regex && (
+                  <button type="button" class="search-save" onClick={() => saveSearchPrompt(query)} disabled={prefs.isSearchSaved(query)}>
+                    <Icon name={prefs.isSearchSaved(query) ? 'pin' : 'plus'} size={14} />
+                    {prefs.isSearchSaved(query) ? 'Saved' : 'Save this search'}
+                  </button>
+                )}
+                <SearchResults query={query} regex={regex} onOpen={openHit} />
+              </>
             ) : (
+              <>
+                {savedList.length > 0 && (
+                  <div class="saved-searches" aria-label="saved searches">
+                    <h2 class="section-title">Searches</h2>
+                    {savedList.map((s) => (
+                      <div key={s.name} class="saved-search">
+                        <button type="button" class="saved-search-run" title={s.query} onClick={() => runSavedSearch(s.query)}>
+                          <Icon name="search" size={14} />
+                          <span class="saved-search-name">{s.name}</span>
+                        </button>
+                        <button type="button" class="icon-btn" aria-label={`Remove ${s.name}`} title={`Remove ${s.name}`} onClick={() => prefs.forgetSearch(s.name)}>
+                          <Icon name="x" size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               <nav class="tree" aria-label="tree">
                 {treeError ? (
                   <div class="empty">
@@ -2021,9 +2108,10 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
                       onEditDone={() => setTreeEdit(null)}
                       onContext={treeContext}
                     />
-                  </>
-                )}
+                   </>
+                 )}
               </nav>
+              </>
             )}
           </div>
           {!searching && (
