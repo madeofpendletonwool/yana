@@ -62,6 +62,42 @@ class ModelsTest {
         assertEquals("hi", n.markdown)
         assertEquals("editor", n.role)
         assertFalse(n.public)
+        assertEquals("h", n.contentHash)
+        assertFalse(n.trusted)
+    }
+
+    @Test fun htmlNoteFields() {
+        val n = YanaJson.decodeFromString(
+            Note.serializer(),
+            """{"id":"01B","space":"work","path":"work/dash.html","title":"Dash","preview":"p","kind":"html",
+               "content_hash":"abc","updated_at":"2026-09-02T00:00:00Z","trusted":true,"source":"<p>hi</p>","role":"editor"}""",
+        )
+        assertTrue(n.trusted)
+        assertEquals("abc", n.contentHash)
+        assertEquals("<p>hi</p>", n.source)
+    }
+
+    @Test fun noteViewUrl() {
+        val v = YanaJson.decodeFromString(
+            NoteView.serializer(),
+            """{"url":"http://192.168.1.4:8081/n/01B?token=tok","expires_at":"2026-09-24T12:00:00Z"}""",
+        )
+        assertEquals("http://192.168.1.4:8081/n/01B?token=tok", v.url)
+    }
+
+    @Test fun saveSourceResponseWithConflictCopy() {
+        val r = YanaJson.decodeFromString(
+            SaveSourceResponse.serializer(),
+            """{"ok":true,"path":"work/dash.html","hash":"new","conflict_copy":"work/dash.conflict-20260924-101010.html"}""",
+        )
+        assertTrue(r.ok)
+        assertEquals("new", r.hash)
+        assertEquals("work/dash.conflict-20260924-101010.html", r.conflictCopy)
+    }
+
+    @Test fun saveSourceResponseWithoutConflictCopy() {
+        val r = YanaJson.decodeFromString(SaveSourceResponse.serializer(), """{"ok":true,"path":"work/dash.html","hash":"new"}""")
+        assertNull(r.conflictCopy)
     }
 
     @Test fun errorBody() {

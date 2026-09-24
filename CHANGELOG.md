@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- HTML notes render on Android, under `android/`: a sandboxed WebView
+  on the content origin with the same boundary the web's iframe has —
+  JavaScript on, no bridge to the app, no file access, mixed content
+  blocked, and navigation held to the content origin with other links
+  handed to the system browser. The signed view URL is the only
+  credential the WebView carries; the app mints a fresh one on every
+  open and every save. The source edits in a plain text screen with
+  explicit last-write-wins saves that name the conflict copy the server
+  parks, and trust shows as a read-only badge that changes on the web.
+  Offline, the source shows as text and the note says the rendered view
+  needs the server. An instrumented test runs a hostile note on a
+  device: its script cannot fetch the API, read the app origin's
+  cookies, or navigate the WebView away, and a trusted note's canvas
+  animation runs.
+
 - The Android app's first build, under `android/`: Kotlin, Compose and
   Material 3 in the Identity palette and type, light and dark, with a
   launcher icon cut from the wordmark's slash. It connects to a server

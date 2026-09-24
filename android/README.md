@@ -1,8 +1,9 @@
 # YANA/ for Android
 
 The Android client: Kotlin, Jetpack Compose, Material 3. It signs in to a
-YANA/ server and browses its spaces, folders and notes. Notes open
-read-only here for now; editing arrives with the editor.
+YANA/ server and browses its spaces, folders and notes. HTML notes
+render in a sandboxed WebView and edit by source; markdown notes are
+read-only until the editor arrives.
 
 ## Build
 
@@ -11,6 +12,7 @@ cd android
 ./gradlew build              # lint, unit tests, debug and release builds
 ./gradlew assembleDebug      # just the debug APK
 ./gradlew installDebug       # onto a running emulator or a connected phone
+./gradlew connectedDebugAndroidTest  # the WebView sandbox test, on a device
 ```
 
 The debug APK lands at `app/build/outputs/apk/debug/app-debug.apk` and
@@ -82,6 +84,23 @@ there is one HTTP stack, one connection pool and one TLS configuration.
 Ktor would need an engine plus its auth and content-negotiation plugins
 for the same result.
 
+## HTML notes
+
+HTML notes render in a WebView on the content origin, the server's
+second listener, with the same boundary the web's iframe has:
+JavaScript runs, but there is no bridge to the app, no file access, and
+mixed content is blocked. The signed view URL is the only credential
+the WebView holds, minted fresh on every open and expiring in five
+minutes. Navigation stays on the content origin; other links open in
+the system browser. The source edits in a plain text screen with
+explicit saves — whole-file, last-write-wins, with the server parking
+the diverged version as a conflict copy it names in the save's
+message. Trust shows as a read-only badge; it changes on the web. An
+instrumented test (`NoteWebViewSandboxTest`) runs a hostile note on a
+device and checks that its script cannot fetch the API, read the app
+origin's cookies, or navigate the WebView off the content origin, and
+that a trusted note's canvas animation runs.
+
 ## Layout
 
 ```
@@ -90,6 +109,7 @@ app/src/main/java/com/collinpendleton/yana/
   data/                          API models, Retrofit interfaces, token refresh, session store
   ui/Nav.kt                      routes: server → sign-in → spaces → space tree → note; settings
   ui/screens/                    one file per screen
+  ui/htmlnote/                   the sandboxed WebView, the source editor, view-token minting
   ui/theme/                      the Identity palette and type
 crdt/                            the CRDT engine slot (below)
 fonts/                           licenses for the bundled fonts
