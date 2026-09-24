@@ -87,7 +87,16 @@ class TokenAuth(
                 return null
             }
             if (!resp.isSuccessful) throw IOException("refresh failed: HTTP ${resp.code}")
-            val tokens = YanaJson.decodeFromString(RefreshResponse.serializer(), resp.body.string()).tokens
+            // A 200 that is not a token payload (captive portal, a proxy erroring in
+            // HTML) must not escape as a SerializationException: an interceptor may
+            // only throw IOException, and anything else kills the dispatcher thread.
+            val tokens = try {
+                YanaJson.decodeFromString(RefreshResponse.serializer(), resp.body.string()).tokens
+            } catch (e: IOException) {
+                throw e
+            } catch (e: Exception) {
+                throw IOException("refresh response was not a token payload", e)
+            }
             val next = s.withTokens(tokens)
             store.save(next)
             return next
