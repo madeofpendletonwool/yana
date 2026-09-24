@@ -261,6 +261,7 @@ make test       # go test ./... and the web typecheck
 make lint       # gofmt and go vet
 make docker     # build the image locally
 make android-crdt  # build the Android CRDT AAR into android/crdt/libs
+cd android && ./gradlew build  # the Android app: lint, unit tests, APKs
 ```
 
 One Go binary with the web client embedded. `cmd/yana` is the entry
@@ -270,8 +271,8 @@ index in step, `rt` is the realtime relay, `mcp` the agent endpoint,
 `git` the history layer, `guide` the starter notes); `web/` is the Preact
 and CodeMirror client; `mobile/crdt` is the bind package behind the
 Android client's CRDT engine ([mobile/crdt/README.md](mobile/crdt/README.md));
-`spike/crdt/` is the CRDT evaluation harness the
-design started from.
+`android/` is the Android app ([android/README.md](android/README.md));
+`spike/crdt/` is the CRDT evaluation harness the design started from.
 
 The reconciliation tests include a 60 second oscillation check and a
 process-kill check; the relay tests include a server-restart convergence
@@ -281,14 +282,17 @@ in `spike/crdt/js`; without them those tests skip.
 
 Work happens on short-lived branches off `main`, with Conventional Commit
 messages and a pull request per change. CI runs gofmt, vet, build, tests,
-the web typecheck, and a container smoke test on every pull request;
-merges to `main` publish the image.
+the web typecheck, and a container smoke test on every pull request,
+plus the Android build when `android/` changes; merges to `main`
+publish the image.
 
 ## Roadmap
 
 Planned next, roughly in order: importers for markdown vaults and Notion
-exports; templates with variables; vim keys; and an
-Android app.
+exports; templates with variables; vim keys; and the rest of the
+Android app — an offline replica and search, realtime sync, the editor,
+and capture from the share sheet, a tile and a widget. It signs in and
+browses today.
 
 ## License
 
