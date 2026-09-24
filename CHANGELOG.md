@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- The Android CRDT engine. `mobile/crdt` is the bind package over the
+  Go Yjs port: create, edit, and diff-apply a note's body; apply and
+  encode updates; snapshot and compact; an undo manager scoped to the
+  device's own edits, so one person's undo never reverts another's; and
+  an update observer that hands Kotlin one incremental update per
+  committed transaction, in UTF-16 offsets that map straight onto
+  text-field indices. `make android-crdt` builds the AAR into
+  `android/crdt/libs` with gomobile, the NDK, and the API floor pinned,
+  and CI builds and attaches it on every pull request that touches
+  `mobile/`. The Go tests converge with the browser reference
+  implementation on shared fixtures.
+
 - Conflict copies, surfaced and resolved. The scanner marks notes whose
   file names say `*.conflict-<ts>.(md|html)` with a `conflict_of`
   column pointing at the surviving note while it exists (migration
