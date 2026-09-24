@@ -492,9 +492,11 @@ export const api = {
     get<{ mode: 'fts'; hits: SearchHit[]; attachments: AttachmentHit[] }>(
       `/api/search?q=${encodeURIComponent(q)}` + (space ? `&space=${encodeURIComponent(space)}` : ''),
     ),
+  /** The regex search: the pattern against the files, with path: and
+   * space: terms narrowing where it runs. */
   regex: (raw: string, space?: string) =>
     get<{ mode: 'regex'; hits: RegexHit[] }>(
-      `/api/search?raw=${encodeURIComponent(raw)}` + (space ? `&space=${encodeURIComponent(space)}` : ''),
+      `/api/search/regex?raw=${encodeURIComponent(raw)}` + (space ? `&space=${encodeURIComponent(space)}` : ''),
     ),
   status: () => get<Status>('/api/status'),
   backlinks: (id: string) =>
