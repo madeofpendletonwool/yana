@@ -13,6 +13,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -27,7 +29,10 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +47,7 @@ import com.collinpendleton.yana.ui.ConnectionDot
 import com.collinpendleton.yana.ui.Loader
 import com.collinpendleton.yana.ui.Placeholder
 import com.collinpendleton.yana.ui.formatTime
+import com.collinpendleton.yana.ui.editor.MarkdownEditor
 import com.collinpendleton.yana.ui.htmlnote.HtmlNotePane
 
 /**
@@ -49,11 +55,11 @@ import com.collinpendleton.yana.ui.htmlnote.HtmlNotePane
  * server, or from the replica when the server is out of reach. A
  * markdown note also joins the realtime document: its body is the
  * CRDT's text once the local state loads or the first handshake
- * lands, and the connection dot beside the title says whether edits
- * are waiting, settling, or live. HTML renders in a sandboxed WebView
- * on the content origin, with its source editable beside it (offline,
- * the source reads as text until the server returns). The markdown
- * editor arrives with the editor.
+ * lands, the connection dot beside the title says whether edits are
+ * waiting, settling, or live, and the edit button opens the editor
+ * bound to that document. HTML renders in a sandboxed WebView on the
+ * content origin, with its source editable beside it (offline, the
+ * source reads as text until the server returns).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,6 +78,8 @@ fun NoteScreen(repo: NoteRepository, sync: SyncEngine, id: String, title: String
     val liveText = live?.text?.collectAsStateWithLifecycle()?.value
     val liveReady = live?.ready?.collectAsStateWithLifecycle()?.value == true
     val status by sync.status.collectAsStateWithLifecycle()
+    var editing by rememberSaveable(id) { mutableStateOf(false) }
+    val canEdit = !isHtml && note?.role != "viewer"
 
     Scaffold(
         topBar = {
@@ -81,6 +89,15 @@ fun NoteScreen(repo: NoteRepository, sync: SyncEngine, id: String, title: String
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
+                    if (canEdit && editing) {
+                        IconButton(onClick = { editing = false }) {
+                            Icon(Icons.Default.Check, contentDescription = "Done editing")
+                        }
+                    } else if (canEdit) {
+                        IconButton(onClick = { editing = true }) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit")
+                        }
+                    }
                     if (!isHtml) ConnectionDot(status, Modifier.padding(end = 20.dp))
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -100,6 +117,13 @@ fun NoteScreen(repo: NoteRepository, sync: SyncEngine, id: String, title: String
                     NoteHeader(note, Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp))
                     HtmlNotePane(repo, note, Modifier.widthIn(max = 720.dp).fillMaxWidth().weight(1f))
                 }
+            } else if (editing && live != null && liveReady) {
+                MarkdownEditor(
+                    sync = sync,
+                    handle = live,
+                    noteId = id,
+                    modifier = Modifier.fillMaxSize(),
+                )
             } else {
                 Column(
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
@@ -163,7 +187,6 @@ private fun NoteBody(note: Note, liveBody: String?, modifier: Modifier) {
             }
             else -> Hint("This kind of note opens on the web for now.")
         }
-        if (liveBody == null) Hint("Read-only on this device until the editor arrives.")
     }
 }
 

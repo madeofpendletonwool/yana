@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import mockwebserver3.Dispatcher
@@ -228,6 +229,137 @@ class SyncEngineTest {
         waitUntil { store.states[note]?.decodeToString()?.contains("persisted") == true }
     }
 
+    @Test
+    fun editOpQueuesOneUpdateAndPublishesTheChange() {
+        serverTextRef = "base"
+        val handle = engine.open(note)
+        waitUntil { engine.status.value == RtStatus.Live }
+        engine.editOp(note, 4, 0, "!")
+        waitUntil { store.outboxCount() == 0 }
+        waitUntil { liveRelays.any { r -> r.frames.any { it.t == Rt.UPD && it.u?.decodeToString() == "e:4:0:!" } } }
+        // The change arrives on the edits flow, local, with its hunks.
+        waitUntil { handle.edits.value != null && handle.edits.value!!.second.local }
+        val edit = handle.edits.value!!.second
+        assertEquals("""[{"p":4,"d":0,"i":1}]""", edit.delta)
+        assertEquals("base!", handle.text.value)
+        waitUntil { handle.undoDepth.value == 1L }
+        engine.close(note)
+    }
+
+    @Test
+    fun undoRevertsThisDevicesWorkOnly() {
+        serverTextRef = "server text "
+        val handle = engine.open(note)
+        waitUntil { engine.status.value == RtStatus.Live }
+        waitUntil { handle.text.value == "server text " }
+        engine.editOp(note, 12, 0, "and mine")
+        waitUntil { handle.text.value == "server text and mine" }
+        engine.undo(note)
+        // The server's text survives; only the local edit reverts.
+        waitUntil { handle.text.value == "server text " }
+        waitUntil { handle.edits.value != null && handle.edits.value!!.second.local }
+        // The undo itself is an update the server gets.
+        waitUntil { store.outboxCount() == 0 }
+        engine.redo(note)
+        waitUntil { handle.text.value == "server text and mine" }
+        engine.close(note)
+    }
+
+    @Test
+    fun aPeersCursorArrivesAndClears() {
+        serverTextRef = "hello world"
+        val handle = engine.open(note)
+        waitUntil { engine.status.value == RtStatus.Live }
+        val state = PresenceState.encode(
+            presenceFor("wren"),
+            """{"type":null,"tname":"body","item":{"client":42,"clock":2},"assoc":0}""".toByteArray(),
+            """{"type":null,"tname":"body","item":{"client":42,"clock":4},"assoc":0}""".toByteArray(),
+        )
+        val payload = Awareness.encode(42, 1, state)
+        val decoded = Awareness.decode(payload)
+        check(decoded != null && decoded.single().clientID == 42L) { "codec self-test failed: $decoded" }
+        liveRelays.first().push(ServerFrame(t = Rt.AW, n = note, p = payload))
+        waitUntil { handle.presence.value.containsKey(42L) }
+        val peer = handle.presence.value.getValue(42L)
+        assertEquals("wren", peer.name)
+        assertEquals(2, peer.anchor)
+        assertEquals(4, peer.head)
+        assertTrue(peer.selection)
+        // The peer leaving is the null state with a higher clock.
+        liveRelays.first().push(ServerFrame(t = Rt.AW, n = note, p = Awareness.encode(42, 2, null)))
+        waitUntil { !handle.presence.value.containsKey(42L) }
+        // A stale replay of the old clock is ignored.
+        liveRelays.first().push(ServerFrame(t = Rt.AW, n = note, p = Awareness.encode(42, 1, state)))
+        blocking { delay(300) }
+        assertEquals(false, handle.presence.value.containsKey(42L))
+        engine.close(note)
+    }
+
+    @Test
+    fun ourCursorBroadcastsAndWithdraws() {
+        serverTextRef = "hello"
+        engine.open(note)
+        waitUntil { engine.status.value == RtStatus.Live }
+        engine.sendCursor(note, 1, 1)
+        waitUntil { liveRelays.flatMap { it.frames }.any { it.t == Rt.AW } }
+        val aw = liveRelays.flatMap { it.frames }.last { it.t == Rt.AW }
+        val entry = Awareness.decode(aw.p!!)!!.single()
+        assertEquals(1234L, entry.clientID)
+        assertEquals(1L, entry.clock)
+        val (user, _) = PresenceState.decode(entry.stateJson!!)!!
+        assertEquals("ada", user.name)
+        engine.sendCursorRemoval(note)
+        waitUntil {
+            liveRelays.flatMap { it.frames }.filter { it.t == Rt.AW }.any { f ->
+                Awareness.decode(f.p!!)?.singleOrNull()?.stateJson == null
+            }
+        }
+        engine.close(note)
+    }
+
+    @Test
+    fun stalePeersAreSwept() {
+        var clock = 1_000_000L
+        val e2 = SyncEngine(
+            client = YanaClient(MemorySessionStore(session())),
+            store = store,
+            transport = OkHttpRtTransport(OkHttpClient()),
+            docs = docs,
+            scope = scope,
+            random = Random(7),
+            now = { clock },
+            timings = SyncEngine.Timings(
+                flushMs = 10,
+                backoffMinMs = 5,
+                backoffMaxMs = 40,
+                backoffJitterMs = 2,
+                keepaliveMs = 60_000,
+                persistDebounceMs = 5,
+                bodyDebounceMs = 10,
+                dialTimeoutMs = 5_000,
+                backgroundTimeoutMs = 5_000,
+                presenceSweepMs = 25,
+                presenceTimeoutMs = 100,
+            ),
+        )
+        try {
+            val handle = e2.open(note)
+            waitUntil { e2.status.value == RtStatus.Live }
+            liveRelays.last().push(
+                ServerFrame(
+                    t = Rt.AW,
+                    n = note,
+                    p = Awareness.encode(42, 1, PresenceState.encode(presenceFor("wren"), null, null)),
+                ),
+            )
+            waitUntil { handle.presence.value.containsKey(42L) }
+            clock += 200
+            waitUntil { !handle.presence.value.containsKey(42L) }
+        } finally {
+            e2.shutdown()
+        }
+    }
+
 
     /** The relay: answers subs with the delta, pings with pongs, and can be told to die. */
     private class FakeRelay(
@@ -236,10 +368,17 @@ class SyncEngineTest {
     ) : WebSocketListener() {
         val frames = CopyOnWriteArrayList<ClientFrame>()
         var server: String = ""
+
+        @Volatile
         var ws: WebSocket? = null
 
         override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
             ws = webSocket
+        }
+
+        /** Pushes a frame to the client, as the server would. */
+        fun push(f: ServerFrame) {
+            ws?.send(encodeServerFrame(f).toByteString())
         }
 
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
@@ -259,9 +398,17 @@ class SyncEngineTest {
     }
 }
 
-/** Documents where updates are appended text — enough for flow, not for CRDT math. */
+/**
+ * Documents where updates are appended text — enough for flow, not for
+ * CRDT math. The editor surface (edit/undo/redo/observe/positions) is
+ * real enough to drive the engine: a string with an op stack, text
+ * events with hunks, and positions that are the index in disguise.
+ */
 private class FakeDoc(override val noteId: String, state: ByteArray) : RtDoc {
     var text = state.decodeToString()
+    private val observers = CopyOnWriteArrayList<RtTextObserver>()
+    private val undoOps = ArrayDeque<Pair<String, String>>() // text after -> text before
+    private val redoOps = ArrayDeque<Pair<String, String>>()
 
     override fun text(): String = text
 
@@ -271,18 +418,89 @@ private class FakeDoc(override val noteId: String, state: ByteArray) : RtDoc {
 
     override fun apply(update: ByteArray): Boolean {
         if (update.isEmpty()) return false
+        val before = text
         text += update.decodeToString()
+        notify(before, local = false)
         return true
     }
 
     override fun replaceText(want: String): ByteArray? {
         if (want.length < text.length || want == text) return null
+        val before = text
         val update = want.substring(text.length).toByteArray()
         text = want
+        undoOps.addLast(want to before)
+        notify(before, local = true)
         return update
     }
 
+    override fun edit(pos: Int, del: Int, insert: String): ByteArray? {
+        if (del == 0 && insert.isEmpty()) return null
+        require(pos + del <= text.length) { "edit out of range" }
+        val before = text
+        text = text.substring(0, pos) + insert + text.substring(pos + del)
+        undoOps.addLast(text to before)
+        val update = "e:$pos:$del:$insert".toByteArray()
+        notify(before, local = true)
+        return update
+    }
+
+    override fun undo(): ByteArray? {
+        val (after, before) = undoOps.removeLastOrNull() ?: return null
+        text = before
+        redoOps.addLast(before to after)
+        notify(after, local = true)
+        return "u".toByteArray()
+    }
+
+    override fun redo(): ByteArray? {
+        val (before, after) = redoOps.removeLastOrNull() ?: return null
+        text = after
+        undoOps.addLast(after to before)
+        notify(before, local = true)
+        return "r".toByteArray()
+    }
+
+    override fun undoDepth(): Long = undoOps.size.toLong()
+
+    override fun redoDepth(): Long = redoOps.size.toLong()
+
+    override fun observe(observer: RtTextObserver): () -> Unit {
+        observers.add(observer)
+        return { observers.remove(observer) }
+    }
+
+    override fun clientID(): Long = 1234L
+
+    // Positions are the real JSON shape, with the index smuggled into
+    // the item's clock.
+    override fun positionJSON(index: Int, assoc: Int): ByteArray =
+        """{"type":null,"tname":"body","item":{"client":1234,"clock":$index},"assoc":0}""".toByteArray()
+
+    override fun resolvePosition(json: ByteArray): Int = runCatching {
+        val s = json.decodeToString()
+        s.substringAfter("\"clock\":").substringBefore("}").toInt()
+    }.getOrDefault(-1)
+
     override fun close() {}
+
+    private fun notify(before: String, local: Boolean) {
+        val delta = hunksBetween(before, text)
+        for (o in observers) o.onText(text, delta, local)
+    }
+
+    /** The one replacement region between two strings, as the real doc's hunks. */
+    private fun hunksBetween(old: String, new: String): String? {
+        if (old == new) return null
+        var p = 0
+        val minLen = minOf(old.length, new.length)
+        while (p < minLen && old[p] == new[p]) p++
+        var sfx = 0
+        while (sfx < minLen - p && old[old.length - 1 - sfx] == new[new.length - 1 - sfx]) sfx++
+        val del = old.length - p - sfx
+        val ins = new.length - p - sfx
+        return """[{"p":$p,"d":$del,"i":$ins}]"""
+    }
 }
 
 private class FakeDocFactory : RtDocFactory {
