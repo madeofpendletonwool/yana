@@ -2,8 +2,7 @@ package com.collinpendleton.yana.ui.htmlnote
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.collinpendleton.yana.data.SaveSourceRequest
-import com.collinpendleton.yana.data.YanaClient
+import com.collinpendleton.yana.data.NoteRepository
 import com.collinpendleton.yana.data.userMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -35,12 +34,12 @@ class HtmlNoteModel : ViewModel() {
 
     private var mint: Job? = null
 
-    fun load(client: YanaClient, id: String) {
+    fun load(repo: NoteRepository, id: String) {
         mint?.cancel()
         _view.value = _view.value.copy(loading = _view.value.url == null)
         mint = viewModelScope.launch {
             try {
-                _view.value = HtmlViewState(url = client.api().noteView(id).url)
+                _view.value = HtmlViewState(url = repo.noteView(id).url)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: HttpException) {
@@ -60,16 +59,16 @@ class HtmlNoteModel : ViewModel() {
     }
 
     /** Saves the source, last-write-wins; [onSaved] gets the new base hash and any conflict copy name. */
-    fun save(client: YanaClient, id: String, source: String, baseHash: String, onSaved: (hash: String?, conflictCopy: String?) -> Unit) {
+    fun save(repo: NoteRepository, id: String, source: String, baseHash: String, onSaved: (hash: String?, conflictCopy: String?) -> Unit) {
         if (saving.value) return
         saving.value = true
         viewModelScope.launch {
             try {
-                val res = client.api().saveSource(id, SaveSourceRequest(source, baseHash))
+                val res = repo.saveSource(id, source, baseHash)
                 saving.value = false
                 message.value = res.conflictCopy?.let { "Saved. The version that was on disk moved to $it." }
                 onSaved(res.hash, res.conflictCopy)
-                load(client, id)
+                load(repo, id)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

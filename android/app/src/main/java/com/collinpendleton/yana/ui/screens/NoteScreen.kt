@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.collinpendleton.yana.data.Note
-import com.collinpendleton.yana.data.YanaClient
+import com.collinpendleton.yana.data.NoteRepository
 import com.collinpendleton.yana.data.stripFrontmatter
 import com.collinpendleton.yana.ui.Loader
 import com.collinpendleton.yana.ui.Placeholder
@@ -41,15 +41,17 @@ import com.collinpendleton.yana.ui.formatTime
 import com.collinpendleton.yana.ui.htmlnote.HtmlNotePane
 
 /**
- * A note: its title, where it lives, its tags, and its body. Markdown
+ * A note: its title, where it lives, its tags, and its body — from the
+ * server, or from the replica when the server is out of reach. Markdown
  * reads as text; HTML renders in a sandboxed WebView on the content
- * origin, with its source editable beside it. The markdown editor
- * arrives with the editor.
+ * origin, with its source editable beside it (offline, the source
+ * reads as text until the server returns). The markdown editor arrives
+ * with the editor.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NoteScreen(client: YanaClient, id: String, title: String, onBack: () -> Unit) {
-    val vm: Loader<Note> = viewModel(key = "note:$id") { Loader { client.api().note(id) } }
+fun NoteScreen(repo: NoteRepository, id: String, title: String, onBack: () -> Unit) {
+    val vm: Loader<Note> = viewModel(key = "note:$id") { Loader(fetch = { repo.note(id) }) }
     val state by vm.loaded.collectAsStateWithLifecycle()
     val note = state.data
 
@@ -75,7 +77,7 @@ fun NoteScreen(client: YanaClient, id: String, title: String, onBack: () -> Unit
                 // No outer scroll: the WebView and the source editor scroll themselves.
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
                     NoteHeader(note, Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp))
-                    HtmlNotePane(client, note, Modifier.widthIn(max = 720.dp).fillMaxWidth().weight(1f))
+                    HtmlNotePane(repo, note, Modifier.widthIn(max = 720.dp).fillMaxWidth().weight(1f))
                 }
             } else {
                 Column(

@@ -31,12 +31,33 @@ interface YanaApi {
     @GET("api/tree")
     suspend fun tree(@Query("space") space: String? = null): TreeResponse
 
+    /**
+     * The flat note list the offline replica syncs from: every visible
+     * note with its metadata and tags, or just one space's when given.
+     */
+    @GET("api/notes")
+    suspend fun notes(@Query("space") space: String? = null): NotesResponse
+
     @GET("api/notes/{id}")
     suspend fun note(@Path("id") id: String): Note
 
     /** The signed content-origin URL an HTML note renders in. */
     @GET("api/notes/{id}/view")
     suspend fun noteView(@Path("id") id: String): NoteView
+
+    /** Full-text search with the operator grammar, the server's half. */
+    @GET("api/search")
+    suspend fun search(
+        @Query("q") query: String,
+        @Query("space") space: String? = null,
+        @Query("limit") limit: Int = 50,
+    ): SearchResponse
+
+    @POST("api/notes")
+    suspend fun createNote(@Body body: CreateNoteRequest): CreateNoteResponse
+
+    @POST("api/notes/{id}/move")
+    suspend fun moveNote(@Path("id") id: String, @Body body: MoveRequest): retrofit2.Response<Unit>
 
     /** Saves an HTML note's source, whole-file and last-write-wins. */
     @PUT("api/notes/{id}/source")

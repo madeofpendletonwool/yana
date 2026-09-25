@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- The Android app's offline replica. A Room database under `android/`
+  mirrors the server's cache tables — spaces, notes, tags, note bodies,
+  the flattened folder tree, and a `pending_ops` queue for offline
+  create, append and move actions that replay on the next sync.
+  Metadata syncs on launch, on pull-to-refresh, and from a six-hourly
+  WorkManager job; a note's text is cached as it is opened; the
+  replica is wiped when the account or server changes or on sign-out.
+  The tree, note list, note reading, and search all work in airplane
+  mode. Search answers from an FTS5 trigram index declared with the
+  server's own DDL over the bundled SQLite driver, and the query
+  grammar and search SQL are line-for-line ports of the server's, so
+  the same query returns the same ordered results offline and online —
+  pinned by an instrumented test over a 200-note fixture corpus whose
+  expectations are the server engine's own output, regenerated and
+  verified by a Go test. Screens go through a `NoteRepository` instead
+  of Room or REST, and a search screen joins the shell.
+  `GET /api/notes` lists the visible notes flat with metadata and tags;
+  it is what the replica syncs from. See
+  docs/android-offline-search.md for the match semantics and the
+  recorded divergences (author:, is:task and has: are server-only
+  offline; markdown appends wait for the editor's CRDT transport).
+
 - HTML notes render on Android, under `android/`: a sandboxed WebView
   on the content origin with the same boundary the web's iframe has —
   JavaScript on, no bridge to the app, no file access, mixed content

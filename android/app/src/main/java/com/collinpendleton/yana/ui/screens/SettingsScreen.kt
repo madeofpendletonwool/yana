@@ -56,7 +56,7 @@ fun SettingsScreen(app: YanaApp, onBack: () -> Unit) {
     val client = app.client
     val session by client.session.collectAsStateWithLifecycle()
     val mode by app.prefs.themeMode.collectAsStateWithLifecycle()
-    val sessions: Loader<List<SessionInfo>> = viewModel { Loader { client.api().sessions().sessions } }
+    val sessions: Loader<List<SessionInfo>> = viewModel { Loader(fetch = { client.api().sessions().sessions }) }
     val device by sessions.loaded.collectAsStateWithLifecycle()
     var confirming by remember { mutableStateOf(false) }
     var signingOut by remember { mutableStateOf(false) }

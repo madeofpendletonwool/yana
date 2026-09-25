@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.collinpendleton.yana.data.Note
-import com.collinpendleton.yana.data.YanaClient
+import com.collinpendleton.yana.data.NoteRepository
 import com.collinpendleton.yana.ui.theme.Mono
 
 /**
@@ -45,7 +45,7 @@ import com.collinpendleton.yana.ui.theme.Mono
  * aside. Trust shows as a read-only badge and is changed on the web.
  */
 @Composable
-fun HtmlNotePane(client: YanaClient, note: Note, modifier: Modifier = Modifier) {
+fun HtmlNotePane(repo: NoteRepository, note: Note, modifier: Modifier = Modifier) {
     val vm: HtmlNoteModel = viewModel(key = "htmlnote:${note.id}") { HtmlNoteModel() }
     val view by vm.view.collectAsStateWithLifecycle()
     val saving by vm.saving.collectAsStateWithLifecycle()
@@ -56,7 +56,7 @@ fun HtmlNotePane(client: YanaClient, note: Note, modifier: Modifier = Modifier) 
     var baseHash by remember(note.id) { mutableStateOf(note.contentHash) }
     var dirty by remember(note.id) { mutableStateOf(false) }
 
-    LaunchedEffect(note.id) { vm.load(client, note.id) }
+    LaunchedEffect(note.id) { vm.load(repo, note.id) }
     // A refresh that brings a newer file adopts it, unless there are unsaved edits.
     LaunchedEffect(note.id, note.updatedAt) {
         if (!dirty) {
@@ -73,7 +73,7 @@ fun HtmlNotePane(client: YanaClient, note: Note, modifier: Modifier = Modifier) 
                 TextButton(
                     enabled = dirty && !saving,
                     onClick = {
-                        vm.save(client, note.id, source, baseHash) { hash, _ ->
+                        vm.save(repo, note.id, source, baseHash) { hash, _ ->
                             baseHash = hash ?: baseHash
                             dirty = false
                         }

@@ -1,9 +1,10 @@
 # YANA/ for Android
 
 The Android client: Kotlin, Jetpack Compose, Material 3. It signs in to a
-YANA/ server and browses its spaces, folders and notes. HTML notes
-render in a sandboxed WebView and edit by source; markdown notes are
-read-only until the editor arrives.
+YANA/ server and browses its spaces, folders and notes, with an offline
+replica (Room) that keeps the tree, note reading, and search working in
+airplane mode. HTML notes render in a sandboxed WebView and edit by
+source; markdown notes are read-only until the editor arrives.
 
 ## Build
 
@@ -20,6 +21,12 @@ installs beside a release build (`com.collinpendleton.yana.debug`). CI
 runs `./gradlew build` on every pull request that touches `android/` and
 attaches the debug APK to the run as `yana-debug-apk`.
 
+The instrumented tests (`./gradlew connectedDebugAndroidTest`, emulator
+or device attached) check the offline search against the fixture corpus
+in `app/src/androidTest/assets/searchfixtures/`; see
+[docs/android-offline-search.md](../docs/android-offline-search.md)
+for how that corpus is generated and what parity it pins.
+
 Put the SDK location in `android/local.properties`
 (`sdk.dir=/path/to/Android/sdk`) or set `ANDROID_HOME`. Android Studio
 writes the file itself.
@@ -33,6 +40,9 @@ writes the file itself.
 | `compileSdk` | 37 | Current AndroidX and OkHttp releases require it to compile against |
 | `targetSdk` | 36 (Android 16) | The newest release the app has been run against; it moves up after a run on the next release's behaviour changes |
 | `minSdk` | 26 (Android 8.0) | Adaptive icons and `java.time` without desugaring, the Keystore features `EncryptedSharedPreferences` relies on, and about 97% of active devices. The CRDT AAR's floor is 24, so it does not constrain this |
+| Room | 2.8.5 (runtime + KSP compiler) | The offline replica |
+| Bundled SQLite | 2.7.1 (`androidx.sqlite:sqlite-bundled`) | The same SQLite build on every device, which is what carries the FTS5 trigram tokenizer the replica's search index is declared with below the API levels that ship it |
+| WorkManager | 2.12.0 | The periodic replica sync |
 
 ## Point it at a local server
 
@@ -84,6 +94,29 @@ there is one HTTP stack, one connection pool and one TLS configuration.
 Ktor would need an engine plus its auth and content-negotiation plugins
 for the same result.
 
+## The offline replica
+
+A Room database (`data/replica/`) mirrors the server's cache tables —
+spaces, notes, tags, note bodies — plus the flattened folder tree and a
+`pending_ops` queue for offline create/append/move actions. Metadata
+syncs on launch, on pull-to-refresh, and from a six-hourly WorkManager
+job; a note's text is cached when it is opened. The replica belongs to
+the signed-in account: a different account or server wipes it, and so
+does signing out.
+
+Search runs against an FTS5 trigram index declared with the server's
+own DDL, and the query grammar and SQL are line-for-line ports of the
+server's, so the same query over the same notes returns the same
+ordered results offline and online. The divergences (author:, is:task,
+has: are server-only; bodies cover opened notes until the editor's
+sync lands) are recorded in
+[docs/android-offline-search.md](../docs/android-offline-search.md).
+
+Screens never touch Room or REST directly: they go through
+`NoteRepository` (`data/NoteRepository.kt`), which answers from the
+server when it can be reached and from the replica when it cannot. The
+editor and capture features join the shell there.
+
 ## HTML notes
 
 HTML notes render in a WebView on the content origin, the server's
@@ -99,15 +132,21 @@ message. Trust shows as a read-only badge; it changes on the web. An
 instrumented test (`NoteWebViewSandboxTest`) runs a hostile note on a
 device and checks that its script cannot fetch the API, read the app
 origin's cookies, or navigate the WebView off the content origin, and
-that a trusted note's canvas animation runs.
+that a trusted note's canvas animation runs. The minted view URL and
+the source saves go through `NoteRepository` like everything else, so
+an HTML note offline reads as its cached source until the server
+returns.
 
 ## Layout
 
 ```
 app/src/main/java/com/collinpendleton/yana/
-  YanaApp.kt, MainActivity.kt   the app's single client and preferences
+  YanaApp.kt, MainActivity.kt   the app's single client, replica, and preferences
   data/                          API models, Retrofit interfaces, token refresh, session store
-  ui/Nav.kt                      routes: server → sign-in → spaces → space tree → note; settings
+  data/replica/                  the Room replica: entities, DAO, tree cache, pending ops
+  data/search/                   the query grammar and offline search SQL (ports of the server's)
+  data/NoteRepository.kt         the one door the screens go through
+  ui/Nav.kt                      routes: server → sign-in → spaces → space tree → note; search; settings
   ui/screens/                    one file per screen
   ui/htmlnote/                   the sandboxed WebView, the source editor, view-token minting
   ui/theme/                      the Identity palette and type

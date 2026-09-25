@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -28,8 +29,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.collinpendleton.yana.data.NoteRepository
 import com.collinpendleton.yana.data.Space
-import com.collinpendleton.yana.data.YanaClient
 import com.collinpendleton.yana.ui.Loader
 import com.collinpendleton.yana.ui.Placeholder
 import com.collinpendleton.yana.ui.Wordmark
@@ -37,8 +38,16 @@ import com.collinpendleton.yana.ui.Wordmark
 /** Home: the spaces this account can see. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SpacesScreen(client: YanaClient, onSpace: (Space) -> Unit, onSettings: () -> Unit) {
-    val vm: Loader<List<Space>> = viewModel { Loader { client.api().spaces().spaces } }
+fun SpacesScreen(
+    repo: NoteRepository,
+    onSpace: (Space) -> Unit,
+    onSearch: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    // The replica answers if the network cannot; pull-to-refresh syncs.
+    val vm: Loader<List<Space>> = viewModel {
+        Loader(fetch = { repo.spaces() }, refetch = { repo.sync(); repo.spaces() })
+    }
     val state by vm.loaded.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -46,6 +55,7 @@ fun SpacesScreen(client: YanaClient, onSpace: (Space) -> Unit, onSettings: () ->
             TopAppBar(
                 title = { Wordmark() },
                 actions = {
+                    IconButton(onClick = onSearch) { Icon(Icons.Default.Search, contentDescription = "Search") }
                     IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
