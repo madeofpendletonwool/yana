@@ -107,6 +107,30 @@ data class Note(
     val markdown: String? = null,
     val source: String? = null,
     val public: Boolean = false,
+    val trusted: Boolean = false,
+    @SerialName("content_hash") val contentHash: String = "",
+)
+
+/** The content-origin URL a rendered HTML note loads, signed for a few minutes. */
+@Serializable
+data class NoteView(
+    val url: String,
+    @SerialName("expires_at") val expiresAt: String = "",
+)
+
+@Serializable
+data class SaveSourceRequest(
+    val source: String,
+    @SerialName("base_hash") val baseHash: String,
+)
+
+/** A source save: last-write-wins, with the diverged disk version parked at [conflictCopy] when there was one. */
+@Serializable
+data class SaveSourceResponse(
+    val ok: Boolean = false,
+    val path: String? = null,
+    val hash: String? = null,
+    @SerialName("conflict_copy") val conflictCopy: String? = null,
 )
 
 @Serializable
@@ -162,9 +186,6 @@ data class CreateNoteResponse(val id: String = "", val path: String = "")
 
 @Serializable
 data class MoveRequest(val path: String)
-
-@Serializable
-data class SourceSave(val source: String, @SerialName("base_hash") val baseHash: String = "")
 
 @Serializable
 data class SessionInfo(

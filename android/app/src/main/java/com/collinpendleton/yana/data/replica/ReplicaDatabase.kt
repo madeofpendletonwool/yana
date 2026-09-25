@@ -34,6 +34,7 @@ data class NoteWithTags(
     val title: String,
     val preview: String,
     val kind: String,
+    @ColumnInfo(name = "content_hash") val contentHash: String,
     val created: Long,
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
     val tags: String?,

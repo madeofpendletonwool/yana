@@ -41,6 +41,10 @@ interface YanaApi {
     @GET("api/notes/{id}")
     suspend fun note(@Path("id") id: String): Note
 
+    /** The signed content-origin URL an HTML note renders in. */
+    @GET("api/notes/{id}/view")
+    suspend fun noteView(@Path("id") id: String): NoteView
+
     /** Full-text search with the operator grammar, the server's half. */
     @GET("api/search")
     suspend fun search(
@@ -55,8 +59,9 @@ interface YanaApi {
     @POST("api/notes/{id}/move")
     suspend fun moveNote(@Path("id") id: String, @Body body: MoveRequest): retrofit2.Response<Unit>
 
+    /** Saves an HTML note's source, whole-file and last-write-wins. */
     @PUT("api/notes/{id}/source")
-    suspend fun putSource(@Path("id") id: String, @Body body: SourceSave): retrofit2.Response<Unit>
+    suspend fun saveSource(@Path("id") id: String, @Body body: SaveSourceRequest): SaveSourceResponse
 
     @GET("api/auth/sessions")
     suspend fun sessions(): SessionsResponse

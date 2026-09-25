@@ -25,7 +25,9 @@ data class SpaceEntity(
 /**
  * One note row. Timestamps are epoch nanoseconds, the unit the server
  * orders by, so offline date filters and newest-first ordering sort
- * exactly as the server's do.
+ * exactly as the server's do. The content hash rides along so an HTML
+ * source save can say what it was based on and a diverged version on
+ * the server is parked, not overwritten.
  */
 @Entity(
     tableName = "notes",
@@ -38,6 +40,7 @@ data class NoteEntity(
     val title: String,
     val preview: String,
     val kind: String,
+    @ColumnInfo(name = "content_hash") val contentHash: String = "",
     val created: Long,
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
 )

@@ -104,6 +104,7 @@ class ReplicaStore(private val db: ReplicaDatabase) {
                     title = n.title,
                     preview = n.preview,
                     kind = n.kind,
+                    contentHash = n.contentHash,
                     created = epochNanos(n.created),
                     updatedAt = epochNanos(n.updatedAt),
                 ) to n.tags

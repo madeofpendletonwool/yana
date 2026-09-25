@@ -36,6 +36,16 @@ interface NoteRepository {
     suspend fun note(id: String): Note
 
     /**
+     * The signed content-origin URL an HTML note renders in. Tokens
+     * live minutes, so every open mints a fresh one; offline there is
+     * no rendered view and the caller shows the source as text.
+     */
+    suspend fun noteView(id: String): NoteView
+
+    /** Saves an HTML note's source, whole-file and last-write-wins. */
+    suspend fun saveSource(id: String, source: String, baseHash: String): SaveSourceResponse
+
+    /**
      * Full-text search with the operator grammar: the server's index
      * when online, the replica's identical one when offline. A query the
      * replica cannot answer (author:, is:task, has:) says so instead of
@@ -114,6 +124,18 @@ class YanaNoteRepository(
         }
     }
 
+    override suspend fun noteView(id: String): NoteView {
+        bind()
+        return client.api().noteView(id)
+    }
+
+    override suspend fun saveSource(id: String, source: String, baseHash: String): SaveSourceResponse {
+        bind()
+        val res = client.api().saveSource(id, SaveSourceRequest(source, baseHash))
+        store.storeBody(id, "html", source)
+        return res
+    }
+
     override suspend fun search(query: String, space: String?): List<SearchResult> {
         if (query.isBlank()) return emptyList()
         bind()
@@ -171,9 +193,14 @@ class YanaNoteRepository(
                     if (cached?.kind != "html") {
                         false // markdown appends ride with the editor
                     } else {
+                        // The cached base hash means a diverged disk version
+                        // is parked as a conflict copy, not overwritten.
                         val src = store.rawBody(op.op.noteId).orEmpty()
-                        val r = client.api().putSource(op.op.noteId, SourceSave(src + op.op.text))
-                        r.isSuccessful || permanent(r.code())
+                        val res = client.api().saveSource(
+                            op.op.noteId,
+                            SaveSourceRequest(src + op.op.text, cached.contentHash),
+                        )
+                        res.ok
                     }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
@@ -211,6 +238,7 @@ class YanaNoteRepository(
             title = row.title,
             preview = row.preview,
             kind = row.kind,
+            contentHash = row.contentHash,
             created = formatEpoch(row.created),
             updatedAt = formatEpoch(row.updatedAt),            tags = row.tags?.split(',')?.filter { it.isNotEmpty() } ?: emptyList(),
             role = "",

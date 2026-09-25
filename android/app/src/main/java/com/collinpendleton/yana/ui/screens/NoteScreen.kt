@@ -38,12 +38,15 @@ import com.collinpendleton.yana.data.stripFrontmatter
 import com.collinpendleton.yana.ui.Loader
 import com.collinpendleton.yana.ui.Placeholder
 import com.collinpendleton.yana.ui.formatTime
+import com.collinpendleton.yana.ui.htmlnote.HtmlNotePane
 
 /**
- * A note, read-only: its title, where it lives, its tags, and its text as
- * written — from the server, or from the replica when the server is out
- * of reach. Editing arrives with the editor; until then the body is the
- * markdown source, selectable for copying.
+ * A note: its title, where it lives, its tags, and its body — from the
+ * server, or from the replica when the server is out of reach. Markdown
+ * reads as text; HTML renders in a sandboxed WebView on the content
+ * origin, with its source editable beside it (offline, the source
+ * reads as text until the server returns). The markdown editor arrives
+ * with the editor.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,11 +73,18 @@ fun NoteScreen(repo: NoteRepository, id: String, title: String, onBack: () -> Un
         ) {
             if (note == null) {
                 Placeholder(loading = state.loading, error = state.error, empty = null, onRetry = { vm.reload() })
+            } else if (note.kind == "html") {
+                // No outer scroll: the WebView and the source editor scroll themselves.
+                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    NoteHeader(note, Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp))
+                    HtmlNotePane(repo, note, Modifier.widthIn(max = 720.dp).fillMaxWidth().weight(1f))
+                }
             } else {
                 Column(
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    NoteHeader(note, Modifier.widthIn(max = 720.dp).fillMaxWidth())
                     NoteBody(note, Modifier.widthIn(max = 720.dp).fillMaxWidth())
                 }
             }
@@ -82,9 +92,10 @@ fun NoteScreen(repo: NoteRepository, id: String, title: String, onBack: () -> Un
     }
 }
 
+/** Where the note lives, when it changed, its tags: everything above the body. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun NoteBody(note: Note, modifier: Modifier) {
+private fun NoteHeader(note: Note, modifier: Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(note.path, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val meta = listOfNotNull(
@@ -109,6 +120,12 @@ private fun NoteBody(note: Note, modifier: Modifier) {
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+@Composable
+private fun NoteBody(note: Note, modifier: Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         when {
             note.kind == "md" -> SelectionContainer {
                 Text(
@@ -116,7 +133,6 @@ private fun NoteBody(note: Note, modifier: Modifier) {
                     style = MaterialTheme.typography.bodyLarge,
                 )
             }
-            note.kind == "html" -> Hint("HTML notes open on the web for now.")
             else -> Hint("This kind of note opens on the web for now.")
         }
         Hint("Read-only on this device until the editor arrives.")

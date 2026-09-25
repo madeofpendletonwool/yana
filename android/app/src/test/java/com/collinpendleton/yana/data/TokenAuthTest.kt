@@ -27,6 +27,7 @@ class TokenAuthTest {
     private var validAccess = "access-1"
     private var revoked = false
     private var refreshes = 0
+    private var refreshReturnsGarbage = false
 
     @Before fun start() {
         server = MockWebServer()
@@ -36,7 +37,10 @@ class TokenAuthTest {
                 return when {
                     path == "/api/auth/refresh" -> {
                         refreshes++
-                        if (revoked || !request.body!!.utf8().contains("\"refresh-1\"")) {
+                        if (refreshReturnsGarbage) {
+                            MockResponse.Builder().code(200).addHeader("Content-Type", "text/html")
+                                .body("<html>sign in to the wifi</html>").build()
+                        } else if (revoked || !request.body!!.utf8().contains("\"refresh-1\"")) {
                             json(401, """{"error":"sign in again"}""")
                         } else {
                             validAccess = "access-${refreshes + 1}"
@@ -131,6 +135,25 @@ class TokenAuthTest {
         assertNull(store.session.value)
         val logout = generateSequence { server.takeRequest(0, TimeUnit.SECONDS) }.first { it.url.encodedPath == "/api/auth/logout" }
         assertTrue(logout.body!!.utf8().contains("refresh-1"))
+    }
+
+    @Test fun aRefreshThatIsNotJsonFailsAsIoNotAsACrash() = runBlocking {
+        // A captive portal answering 200 with HTML: the decode must surface as an
+        // IOException the caller can handle, never as a SerializationException out
+        // of the interceptor chain.
+        val (c, store) = client(now + 10_000) // inside the refresh margin
+        refreshReturnsGarbage = true
+        validAccess = "never-matches"
+        try {
+            c.api().spaces()
+            fail("expected the call to fail")
+        } catch (e: Exception) {
+            // Graceful: the refresh failed as IO, the stale token went out and was
+            // refused. Not a SerializationException out of the interceptor chain.
+            assertTrue(e.toString(), e is HttpException || e is java.io.IOException)
+            if (e is HttpException) assertEquals(401, e.code())
+        }
+        assertNotNull(store.session.value) // an unreadable answer is not a revocation
     }
 
     @Test fun signOutOfflineStillForgetsLocally() = runBlocking {
