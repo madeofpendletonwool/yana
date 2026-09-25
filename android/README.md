@@ -4,7 +4,9 @@ The Android client: Kotlin, Jetpack Compose, Material 3. It signs in to a
 YANA/ server and browses its spaces, folders and notes, with an offline
 replica (Room) that keeps the tree, note reading, and search working in
 airplane mode. HTML notes render in a sandboxed WebView and edit by
-source; markdown notes are read-only until the editor arrives.
+source; markdown notes edit live through the shared document: a plain
+text field whose changes become document operations, with undo scoped
+to this device and other people's cursors drawn in their colors.
 
 ## Build
 
@@ -145,6 +147,32 @@ connection, a dead process, or a day offline all leave the rows in
 place; the next connection re-sends them and CRDT idempotence absorbs
 the duplicates. A connection dot in the note's title bar says where
 things stand — offline, syncing, or live — with no toasts.
+
+## The markdown editor
+
+A note's edit button opens the editor (`ui/editor/`): a plain text
+field bound to the document. Each change the field reports diffs to one
+replacement — `doc.edit(pos, del, insert)` commits the delete and the
+insert as one transaction, so a keystroke is one update, one undo step,
+and one outbox row. Document changes from elsewhere — a peer's typing,
+an undo, the initial sync — arrive on the `observeText` feed as the
+text plus the change's replacement hunks, and the editor maps the
+cursor through them instead of resetting it. Undo is scoped to this
+device by the bind package's manager; a typing burst (keystrokes no
+more than 700ms apart) undoes as one step, and the buttons sit beside
+the field with Ctrl-Z / Ctrl-Y for hardware keyboards.
+
+Presence is the awareness protocol the web speaks: the local cursor
+broadcasts as a JSON relative position on a 50ms throttle over the
+relay's `aw` frames, and other people's cursors and selections draw
+over the text in their colour with a name chip. The codec
+(`data/rt/Awareness.kt`) is pinned by tests against bytes the web's own
+libraries produced. Peers silent for thirty seconds are swept, and
+leaving the editor withdraws the cursor.
+
+Every offset is a UTF-16 code unit end to end — the text field's
+selections, the document, and the wire agree — so emoji and combining
+characters edit cleanly.
 
 The work happens three ways:
 

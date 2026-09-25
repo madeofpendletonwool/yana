@@ -41,12 +41,16 @@ the `Makefile`:
 | `Crdt.loadDoc(state)` | create from a snapshot or full state |
 | `doc.text()` / `doc.len()` | read the body; `len` is in UTF-16 code units |
 | `doc.insert(pos, s)` / `doc.delete(pos, n)` | edit at a UTF-16 offset; returns the update bytes |
+| `doc.edit(pos, del, s)` | replace `del` units at `pos` with `s` in one transaction: one update, one undo step — the shape a text field's diff produces |
 | `doc.replaceText(want)` | diff-apply: mutate the body so it reads as `want`, keeping untouched characters' identity |
 | `doc.applyUpdate(update)` | integrate a peer's update |
 | `doc.stateVector()` / `doc.diff(remoteVector)` / `doc.state()` | delta handshake and snapshot |
 | `Crdt.mergeUpdates(a, b)` | compact an update log without a document |
 | `doc.observeUpdates(observer)` | `OnUpdate(update, local)` per committed transaction |
+| `doc.observeText(observer)` | `OnText(text, delta, local)` per committed transaction; `delta` is the change as replacement hunks (`[{"p":3,"d":0,"i":5}]`) for cursor mapping |
 | `Crdt.newUndoManager(doc)` | `undo()`, `redo()`, stack sizes, scoped to this device's edits |
+| `doc.relativePositionJSON(index, assoc)` | a cursor anchor as the JSON relative position the web's awareness states carry |
+| `doc.resolveRelativePositionJSON(json)` | resolve such a position against the current text; -1 when it cannot resolve |
 
 Every mutating method returns the update it produced (nil when nothing
 changed), so a sync client can forward it without a second encode; the

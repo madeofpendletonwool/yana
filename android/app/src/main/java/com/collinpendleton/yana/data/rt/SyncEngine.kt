@@ -83,6 +83,10 @@ class SyncEngine(
         val bodyDebounceMs: Long = 1_000,
         val dialTimeoutMs: Long = 20_000,
         val backgroundTimeoutMs: Long = 90_000,
+        /** How often the engine renews its own cursor and sweeps peers. */
+        val presenceSweepMs: Long = 15_000,
+        /** A peer silent for this long is pruned (the protocol's rule). */
+        val presenceTimeoutMs: Long = 30_000,
     )
 
     private val _status = MutableStateFlow(RtStatus.Offline)
@@ -90,6 +94,36 @@ class SyncEngine(
 
     private val _events = MutableSharedFlow<RtEvent>(extraBufferCapacity = 64)
     val events: SharedFlow<RtEvent> = _events.asSharedFlow()
+
+    /** A document's text change, on its way from the doc thread to the engine's. */
+    private class DocTextEvent(val noteId: String, val edit: TextEdit)
+
+    /** Text changes arrive on the doc's drain thread and are applied in commit order here. */
+    private val docTextEvents = Channel<DocTextEvent>(Channel.UNLIMITED)
+
+    private var presenceJob: Job? = null
+
+    init {
+        scope.launch {
+            for (e in docTextEvents) {
+                val s = sync { sessions[e.noteId] } ?: continue
+                s.onDocText(e.edit)
+            }
+        }
+        // Presence has a 30-second life on receivers; renew ours and
+        // prune theirs while any note is open.
+        presenceJob = scope.launch {
+            while (true) {
+                delay(timings.presenceSweepMs)
+                if (!wanted()) continue
+                val nowMs = now()
+                for (s in sync { sessions.values.toList() }) {
+                    s.sweepPresence(nowMs)
+                    if (s.awAnnounced) announcePresence(s)
+                }
+            }
+        }
+    }
 
     // Engine state, confined to the scope's single thread (or the monitor).
     private val sessions = LinkedHashMap<String, NoteSession>()
@@ -123,7 +157,7 @@ class SyncEngine(
                 ensureSession()
             }
         }
-        return NoteHandle(noteId, s.text, s.ready, s.everSynced)
+        return NoteHandle(noteId, s.text, s.ready, s.everSynced, s.edits, s.presence, s.undoDepth, s.redoDepth)
     }
 
     /** Drops one reference to a note; the document closes when the last is gone. */
@@ -145,6 +179,43 @@ class SyncEngine(
         }
     }
 
+    /**
+     * The editor's per-keystroke path: one replacement region — the
+     * delete and the insert commit as one transaction, so it is one
+     * update and one undo step.
+     */
+    fun editOp(noteId: String, pos: Int, del: Int, insert: String) {
+        val s = sync { sessions[noteId] } ?: return
+        scope.launch {
+            val update = runCatching { s.withDoc { it.edit(pos, del, insert) } }.getOrNull() ?: return@launch
+            if (update != null) store.addOutboxUpdate(noteId, update)
+            s.afterChange()
+            dirty.add(noteId)
+            scheduleFlush()
+        }
+    }
+
+    /** Reverts the most recent local edit. True when something was undone. */
+    fun undo(noteId: String) {
+        applyStackOp(noteId) { it.undo() }
+    }
+
+    /** Re-applies the most recently undone local edit. True when something was redone. */
+    fun redo(noteId: String) {
+        applyStackOp(noteId) { it.redo() }
+    }
+
+    private fun applyStackOp(noteId: String, op: (RtDoc) -> ByteArray?) {
+        val s = sync { sessions[noteId] } ?: return
+        scope.launch {
+            val update = runCatching { s.withDoc { op(it) } }.getOrNull() ?: return@launch
+            if (update != null) store.addOutboxUpdate(noteId, update)
+            s.afterChange()
+            dirty.add(noteId)
+            scheduleFlush()
+        }
+    }
+
     /** Sends an awareness payload (presence, cursors) for a subscribed note. */
     fun sendAwareness(noteId: String, payload: ByteArray) {
         val s = sync { sessions[noteId] } ?: return
@@ -152,6 +223,44 @@ class SyncEngine(
             if (!connected || !s.subdThisConnection || !s.isLoaded()) return@launch
             send(ClientFrame(Rt.AW, n = noteId, p = payload))
         }
+    }
+
+    /**
+     * Publishes the local cursor for the note's room: the selection as
+     * relative positions in the awareness state. The editor throttles
+     * its calls; each one bumps the state clock the protocol requires.
+     */
+    fun sendCursor(noteId: String, anchor: Int, head: Int) {
+        val s = sync { sessions[noteId] } ?: return
+        scope.launch {
+            val name = client.session.value?.username ?: return@launch
+            val state = s.withDoc { d ->
+                val a = d.positionJSON(anchor, 0) ?: return@withDoc null
+                val h = d.positionJSON(head, 0) ?: return@withDoc null
+                PresenceState.encode(presenceFor(name), a, h)
+            } ?: return@launch
+            s.awState = state
+            s.awAnnounced = true
+            announcePresence(s)
+        }
+    }
+
+    /** Withdraws the local cursor — the null state a peer's view clears on. */
+    fun sendCursorRemoval(noteId: String) {
+        val s = sync { sessions[noteId] } ?: return
+        scope.launch {
+            if (!s.awAnnounced) return@launch
+            s.awState = null
+            announcePresence(s)
+            s.awAnnounced = false
+        }
+    }
+
+    /** Encodes and sends the session's awareness state, whatever it currently is. */
+    private suspend fun announcePresence(s: NoteSession) {
+        if (!connected || !s.subdThisConnection || !s.isLoaded()) return
+        val payload = s.withDoc { d -> Awareness.encode(d.clientID(), ++s.awClock, s.awState) } ?: return
+        send(ClientFrame(Rt.AW, n = s.noteId, p = payload))
     }
 
     /**
@@ -206,11 +315,22 @@ class SyncEngine(
         conn = null
         connected = false
         keepaliveJob?.cancel()
+        presenceJob?.cancel()
         _status.value = RtStatus.Offline
         scope.launch { all.forEach { it.closeDoc() } }
     }
 
     // --- sessions ------------------------------------------------------------
+
+    /** One peer's awareness record: the gated state and when it was last seen. */
+    private class PeerEntry(
+        var clock: Long,
+        var stateJson: String?,
+        var lastSeen: Long,
+        var user: PresenceUser? = null,
+        var anchor: ByteArray? = null,
+        var head: ByteArray? = null,
+    )
 
     /**
      * One note: its document, its flows, and who wants it open. The
@@ -226,6 +346,7 @@ class SyncEngine(
         var backgroundUse = false
         private var doc: RtDoc? = null
         private var loaded = false
+        private var stopText: (() -> Unit)? = null
 
         /** The document's text, for the screen. */
         val text = MutableStateFlow("")
@@ -236,8 +357,25 @@ class SyncEngine(
         /** True once any connection completed this note's handshake. */
         val everSynced = MutableStateFlow(false)
 
+        /** Every text change in commit order, for the editor; seq makes each one distinct. */
+        val edits = MutableStateFlow<Pair<Long, TextEdit>?>(null)
+        private var editSeq = 0L
+
+        /** Other people in the note, cursors resolved to current offsets. */
+        val presence = MutableStateFlow<Map<Long, PeerCursor>>(emptyMap())
+
+        /** Undo and redo availability, for the editor's buttons. */
+        val undoDepth = MutableStateFlow(0L)
+        val redoDepth = MutableStateFlow(0L)
+
         @Volatile
         var subdThisConnection = false
+
+        // Awareness state, confined to the engine's thread.
+        var awClock = 0L
+        var awState: String? = null
+        var awAnnounced = false
+        private val peers = LinkedHashMap<Long, PeerEntry>()
 
         private var persistJob: Job? = null
         private var bodyJob: Job? = null
@@ -254,16 +392,93 @@ class SyncEngine(
                 d.close()
                 return
             }
+            stopText = d.observe(
+                object : RtTextObserver {
+                    override fun onText(text: String, delta: String?, local: Boolean) {
+                        docTextEvents.trySend(DocTextEvent(noteId, TextEdit(text, delta, local)))
+                    }
+                },
+            )
+            refreshDepths()
             if (state != null && state.size > 0) {
                 text.value = d.text()
                 ready.value = true
             }
         }
 
+        /** A committed text change, already on the engine's thread and in order. */
+        fun onDocText(e: TextEdit) {
+            if (sync { sessions[noteId] !== this }) return
+            text.value = e.text
+            ready.value = true
+            edits.value = ++editSeq to e
+            resolvePresence()
+            refreshDepths()
+        }
+
         /** Runs [block] with the document when there is one and the session lives. */
         fun <T> withDoc(block: (RtDoc) -> T): T? {
             val d = sync { if (current()) doc else null } ?: return null
             return block(d)
+        }
+
+        private fun refreshDepths() {
+            val d = sync { doc } ?: return
+            runCatching {
+                undoDepth.value = d.undoDepth()
+                redoDepth.value = d.redoDepth()
+            }
+        }
+
+        /** Applies one inbound awareness payload: clock gating, then re-resolution. */
+        fun onAwareness(payload: ByteArray, nowMs: Long) {
+            val entries = Awareness.decode(payload) ?: return
+            val self = sync { doc }?.clientID()
+            var changed = false
+            for (e in entries) {
+                if (e.clientID == self) continue
+                val known = peers[e.clientID]
+                if (known != null && e.clock < known.clock) continue
+                if (e.clock == known?.clock && !(e.stateJson == null && known.stateJson != null)) continue
+                val parsed = e.stateJson?.let(PresenceState::decode)
+                val entry = known ?: PeerEntry(e.clock, e.stateJson, nowMs).also { peers[e.clientID] = it }
+                entry.clock = e.clock
+                entry.stateJson = e.stateJson
+                entry.lastSeen = nowMs
+                entry.user = parsed?.first
+                entry.anchor = parsed?.second?.first
+                entry.head = parsed?.second?.second
+                changed = true
+            }
+            if (changed) resolvePresence()
+        }
+
+        /** Drops peers gone quiet; the receiver side of the 30-second rule. */
+        fun sweepPresence(nowMs: Long) {
+            val before = peers.size
+            peers.entries.removeIf { nowMs - it.value.lastSeen >= timings.presenceTimeoutMs }
+            if (peers.size != before) resolvePresence()
+        }
+
+        /** Rebuilds the presence map from the table against the current text. */
+        private fun resolvePresence() {
+            val d = sync { doc } ?: return
+            val out = LinkedHashMap<Long, PeerCursor>()
+            for ((client, p) in peers) {
+                if (p.stateJson == null || p.user == null) continue
+                fun at(bytes: ByteArray?): Int? =
+                    bytes?.let { runCatching { d.resolvePosition(it) }.getOrDefault(-1) }?.takeIf { it >= 0 }
+                out[client] =
+                    PeerCursor(
+                        clientID = client,
+                        name = p.user?.name,
+                        color = p.user?.color ?: "#666666",
+                        colorLight = p.user?.colorLight ?: "#66666633",
+                        anchor = at(p.anchor),
+                        head = at(p.head),
+                    )
+            }
+            presence.value = out
         }
 
         /** Publishes text and schedules persistence after any document change. */
@@ -287,10 +502,16 @@ class SyncEngine(
             subdThisConnection = true
             everSynced.value = true
             afterChange()
+            // A new connection starts blank everywhere: say again where
+            // we are, as the web client re-announces on subscribe.
+            if (awAnnounced) {
+                scope.launch { announcePresence(this@NoteSession) }
+            }
         }
 
         fun closeDoc() {
             val d = sync {
+                stopText?.also { stopText = null }
                 val had = doc
                 doc = null
                 loaded = false
@@ -311,6 +532,7 @@ class SyncEngine(
         /** Releases a document nothing could use, without writing state back. */
         fun discard() {
             val d = sync {
+                stopText?.also { stopText = null }
                 val had = doc
                 doc = null
                 loaded = false
@@ -328,6 +550,12 @@ class SyncEngine(
         val text: StateFlow<String>,
         val ready: StateFlow<Boolean>,
         val everSynced: StateFlow<Boolean>,
+        /** Text changes in commit order (a sequence number paired with the edit). */
+        val edits: StateFlow<Pair<Long, TextEdit>?> = MutableStateFlow(null),
+        /** The other people editing, cursors at current offsets. */
+        val presence: StateFlow<Map<Long, PeerCursor>> = MutableStateFlow(emptyMap()),
+        val undoDepth: StateFlow<Long> = MutableStateFlow(0L),
+        val redoDepth: StateFlow<Long> = MutableStateFlow(0L),
     )
 
     /** Loads a session's document, dropping it when the state will not load. */
@@ -350,6 +578,13 @@ class SyncEngine(
         if (s.current()) return
         scope.launch {
             flushOne(noteId)
+            // Leaving a room withdraws the cursor, as the web's editor
+            // does when it closes.
+            if (s.awAnnounced) {
+                s.awState = null
+                announcePresence(s)
+                s.awAnnounced = false
+            }
             if (connected) send(ClientFrame(Rt.UNSUB, n = noteId))
             sync { if (!s.current() && sessions[noteId] === s) sessions.remove(noteId) }
             refreshStatus()
@@ -530,6 +765,7 @@ class SyncEngine(
                 val n = frame.n ?: return
                 val p = frame.p ?: return
                 _events.tryEmit(RtEvent.Awareness(n, frame.a, p))
+                sync { sessions[n] }?.onAwareness(p, now())
             }
             Rt.PONG -> {
                 val watermark = if (pingAcks.isEmpty()) null else pingAcks.removeFirst()

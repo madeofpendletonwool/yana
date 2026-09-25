@@ -483,6 +483,23 @@ user (name, colour) and the editor binding publishes its cursor as a
 relative position. Remote carets draw in the editor with the author's name;
 the bar above the note lists who else is on it.
 
+### On Android
+
+The phone's editor is a plain text field bound to the same document
+(`android/app/src/main/java/com/collinpendleton/yana/ui/editor`). Each
+change the field reports diffs to one replacement — the delete and the
+insert commit as a single transaction, so a keystroke is one update and
+one undo step. Changes from elsewhere (the web, the filesystem, an undo)
+arrive as per-transaction replacement hunks from the bind package, and
+the selection maps through them rather than resetting. Undo groups a
+typing burst — keystrokes no more than 700 ms apart — into one step,
+and Ctrl-Z / Ctrl-Y work on a hardware keyboard as well as the buttons.
+Presence is the same awareness protocol over the same `aw` frames: the
+local cursor broadcasts as a relative position on a 50 ms throttle,
+remote cursors and selections draw over the text in the peer's colour,
+and a name chip rides above each caret. Offsets are UTF-16 code units
+end to end, the unit the field and the document share.
+
 ### Buttons and completion
 
 The same formatting buttons the phone shows above its keyboard sit in
