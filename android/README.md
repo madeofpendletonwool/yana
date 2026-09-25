@@ -9,6 +9,7 @@ source; markdown notes are read-only until the editor arrives.
 ## Build
 
 ```sh
+make android-crdt             # at the repo root: builds the CRDT AAR the app needs
 cd android
 ./gradlew build              # lint, unit tests, debug and release builds
 ./gradlew assembleDebug      # just the debug APK
@@ -18,8 +19,14 @@ cd android
 
 The debug APK lands at `app/build/outputs/apk/debug/app-debug.apk` and
 installs beside a release build (`com.collinpendleton.yana.debug`). CI
-runs `./gradlew build` on every pull request that touches `android/` and
-attaches the debug APK to the run as `yana-debug-apk`.
+runs `make android-crdt` and then `./gradlew build` on every pull
+request that touches `android/` and attaches the debug APK to the run
+as `yana-debug-apk`.
+
+The CRDT AAR needs a JDK (17+), the Android SDK with the pinned NDK,
+and Go; see [mobile/crdt/README.md](../mobile/crdt/README.md). Without
+it the app does not compile — the realtime sync layer calls into it —
+so build it first.
 
 The instrumented tests (`./gradlew connectedDebugAndroidTest`, emulator
 or device attached) check the offline search against the fixture corpus
@@ -108,14 +115,68 @@ Search runs against an FTS5 trigram index declared with the server's
 own DDL, and the query grammar and SQL are line-for-line ports of the
 server's, so the same query over the same notes returns the same
 ordered results offline and online. The divergences (author:, is:task,
-has: are server-only; bodies cover opened notes until the editor's
-sync lands) are recorded in
+has: are server-only) are recorded in
 [docs/android-offline-search.md](../docs/android-offline-search.md).
 
 Screens never touch Room or REST directly: they go through
 `NoteRepository` (`data/NoteRepository.kt`), which answers from the
 server when it can be reached and from the replica when it cannot. The
 editor and capture features join the shell there.
+
+## Realtime sync
+
+Markdown notes are CRDT documents, the same ones the web edits: one
+WebSocket per app speaks the relay protocol in
+[docs/realtime.md](../docs/realtime.md) — binary msgpack frames, a
+`sub` with the device's state vector, the missing delta back as
+`subd`, then streamed `upd` frames — with the same 50ms keystroke
+batching and the same reconnect backoff (500ms doubling to 8s, with
+jitter) the web client uses. The wire codec lives in `data/rt/Wire.kt`
+and its tests pin the bytes against frames the server's own encoder
+produced.
+
+Each note's document is one Room blob (`note_crdt.state`, the
+compaction of everything applied or authored here) plus an outbox
+(`crdt_outbox`) of encoded updates the server has not confirmed.
+Confirmation is the application `ping`/`pong`: the server reads frames
+in order, so a pong proves it applied every update sent before the
+ping, and rows leave the outbox then and only then. A dropped
+connection, a dead process, or a day offline all leave the rows in
+place; the next connection re-sends them and CRDT idempotence absorbs
+the duplicates. A connection dot in the note's title bar says where
+things stand — offline, syncing, or live — with no toasts.
+
+The work happens three ways:
+
+- The note screen opens a session and streams while it is on screen.
+- Going to the background with unconfirmed edits enqueues an expedited
+  WorkManager job that flushes the outbox without the app being open.
+- A periodic job (every 30 minutes, network permitting) flushes
+  anything left and pulls deltas for recently opened notes, updating
+  the replica and its search index.
+
+One platform caveat, recorded rather than hidden: after a literal
+force stop, Android will not run any of the app's jobs until it is
+opened again. The outbox is durable, so the edits survive and go out
+on the next launch (or the next job the system allows); no app can do
+more under a force stop.
+
+Verifying the reconnect story by hand, against `yana` on your
+computer:
+
+```sh
+# With the emulator signed in and a markdown note open:
+adb shell am force-stop com.collinpendleton.yana.debug   # restarts cold, edits intact
+# On the computer: stop the server mid-typing, watch the dot go
+# offline, restart the server, watch the dot return to live and the
+# note converge with what the web shows.
+# Airplane mode for ten minutes with local edits, then back: both
+# sides merge.
+```
+
+The JVM suite (`SyncEngineTest`) runs the same scenarios against
+MockWebServer speaking the real frames, with a stand-in for the CRDT
+engine the AAR provides.
 
 ## HTML notes
 
@@ -141,12 +202,14 @@ returns.
 
 ```
 app/src/main/java/com/collinpendleton/yana/
-  YanaApp.kt, MainActivity.kt   the app's single client, replica, and preferences
+  YanaApp.kt, MainActivity.kt   the app's single client, replica, sync engine, and preferences
   data/                          API models, Retrofit interfaces, token refresh, session store
-  data/replica/                  the Room replica: entities, DAO, tree cache, pending ops
+  data/replica/                  the Room replica: entities, DAO, tree cache, pending ops, CRDT state
+  data/rt/                       the realtime layer: wire codec, socket, engine, workers
   data/search/                   the query grammar and offline search SQL (ports of the server's)
   data/NoteRepository.kt         the one door the screens go through
   ui/Nav.kt                      routes: server → sign-in → spaces → space tree → note; search; settings
+  ui/ConnectionDot.kt            the offline/syncing/live indicator
   ui/screens/                    one file per screen
   ui/htmlnote/                   the sandboxed WebView, the source editor, view-token minting
   ui/theme/                      the Identity palette and type
@@ -161,9 +224,10 @@ fonts/                           licenses for the bundled fonts
 [mobile/crdt/README.md](../mobile/crdt/README.md)). The AAR is a build
 artifact and not committed. The `:crdt` project publishes it as its
 only artifact, so the app's `implementation(project(":crdt"))` picks up
-its classes and native libraries when it is there and nothing when it is
-not. Nothing calls into it until the editor, so the app builds and runs
-either way.
+its classes and native libraries when it is there and nothing when it
+is not. The realtime sync layer (`data/rt/`) calls into it through the
+`RtDocFactory` seam, behind which the JVM tests substitute a fake — so
+build the AAR before `./gradlew build`, which CI does.
 
 ## Identity
 

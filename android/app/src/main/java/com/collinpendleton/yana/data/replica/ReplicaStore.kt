@@ -13,6 +13,7 @@ import com.collinpendleton.yana.data.indexText
 import com.collinpendleton.yana.data.parseInstant
 import com.collinpendleton.yana.data.search.SearchQuery
 import com.collinpendleton.yana.data.search.buildSearchQuery
+import com.collinpendleton.yana.data.rt.OutboxRow
 import java.time.Instant
 import kotlinx.serialization.Serializable
 
@@ -47,7 +48,7 @@ data class PendingOp(val seq: Long, val createdAt: Long, val op: OpPayload)
  * semantics. Network lives one layer up, in NoteRepository; this class
  * only stores, derives, and searches.
  */
-class ReplicaStore(private val db: ReplicaDatabase) {
+class ReplicaStore(private val db: ReplicaDatabase) : com.collinpendleton.yana.data.rt.RtStore {
     private val dao = db.dao()
 
     companion object {
@@ -59,6 +60,7 @@ class ReplicaStore(private val db: ReplicaDatabase) {
         fun open(context: Context): ReplicaStore {
             val db = Room.databaseBuilder(context, ReplicaDatabase::class.java, "replica.db")
                 .setDriver(BundledSQLiteDriver())
+                .addMigrations(ReplicaDatabase.MIGRATION_1_2)
                 .addCallback(object : androidx.room.RoomDatabase.Callback() {
                     // onOpen re-runs the DDL; every statement is IF NOT
                     // EXISTS, so a database that somehow arrived without
@@ -114,7 +116,7 @@ class ReplicaStore(private val db: ReplicaDatabase) {
     }
 
     /** Caches a note's content after the user opened it. */
-    suspend fun storeBody(noteId: String, kind: String, content: String) {
+    override suspend fun storeBody(noteId: String, kind: String, content: String) {
         val (body, raw) = indexText(kind, content)
         dao.storeBody(noteId, body, raw)
     }
@@ -175,6 +177,40 @@ class ReplicaStore(private val db: ReplicaDatabase) {
 
     /** Removes one op after a successful replay (or a permanent refusal). */
     suspend fun dropOp(seq: Long) = dao.dropPendingOp(seq)
+
+    // --- CRDT state and outbox (the sync engine's RtStore) --------------------
+
+    override suspend fun crdtState(noteId: String): ByteArray? = dao.crdtState(noteId)?.state
+
+    override suspend fun storeCrdtState(noteId: String, state: ByteArray) {
+        val row = dao.crdtState(noteId)
+        val now = System.currentTimeMillis()
+        dao.upsertCrdtState(NoteCrdtEntity(noteId, state, row?.openedAt ?: now, now))
+    }
+
+    override suspend fun touchOpened(noteId: String) {
+        val row = dao.crdtState(noteId)
+        val now = System.currentTimeMillis()
+        dao.upsertCrdtState(NoteCrdtEntity(noteId, row?.state ?: ByteArray(0), now, row?.updatedAt ?: now))
+    }
+
+    override suspend fun recentlyOpened(limit: Int): List<String> = dao.recentlyOpenedCrdt(limit)
+
+    override suspend fun addOutboxUpdate(noteId: String, update: ByteArray) {
+        dao.addOutboxRow(CrdtOutboxEntity(noteId = noteId, payload = update, createdAt = System.currentTimeMillis()))
+    }
+
+    override suspend fun outboxFor(noteId: String): List<OutboxRow> = dao.outboxFor(noteId).map { OutboxRow(it.seq, it.payload) }
+
+    override suspend fun outboxNotes(): List<String> = dao.outboxNotes()
+
+    override suspend fun dropOutboxTo(seq: Long) = dao.dropOutboxTo(seq)
+
+    override suspend fun outboxCount(): Int = dao.outboxCount()
+
+    override suspend fun noteKind(noteId: String): String? = dao.noteById(noteId)?.kind
+
+    val outboxCountFlow: kotlinx.coroutines.flow.Flow<Int> get() = dao.outboxCountFlow()
 }
 
 /** One local search result: the same fields a server hit carries. */

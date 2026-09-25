@@ -79,7 +79,7 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
         }
         composable<NoteRoute> { entry ->
             val r = entry.toRoute<NoteRoute>()
-            NoteScreen(repo = app.repo, id = r.id, title = r.title, onBack = { nav.popBackStack() })
+            NoteScreen(repo = app.repo, sync = app.syncEngine, id = r.id, title = r.title, onBack = { nav.popBackStack() })
         }
         composable<SearchRoute> {
             SearchScreen(

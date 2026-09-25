@@ -114,6 +114,39 @@ data class PendingOpEntity(
     @ColumnInfo(name = "created_at") val createdAt: Long,
 )
 
+/**
+ * One note's local CRDT document: the compacted state of every update
+ * this device has applied or authored, so a note edited offline or a
+ * process death loses nothing. `opened_at` drives the background sync's
+ * idea of "recently opened"; `updated_at` is when the state last
+ * changed. A Room blob rather than a file: one database means one wipe
+ * path and the outbox below can commit beside it.
+ */
+@Entity(tableName = "note_crdt")
+data class NoteCrdtEntity(
+    @PrimaryKey @ColumnInfo(name = "note_id") val noteId: String,
+    val state: ByteArray,
+    @ColumnInfo(name = "opened_at") val openedAt: Long,
+    @ColumnInfo(name = "updated_at") val updatedAt: Long,
+)
+
+/**
+ * One encoded local update the server has not confirmed. Rows leave
+ * only after a pong that proves the server read the frame that carried
+ * them; until then a reconnect re-sends them, and CRDT idempotence
+ * makes the duplicate harmless.
+ */
+@Entity(
+    tableName = "crdt_outbox",
+    indices = [Index("note_id")],
+)
+data class CrdtOutboxEntity(
+    @PrimaryKey(autoGenerate = true) val seq: Long = 0,
+    @ColumnInfo(name = "note_id") val noteId: String,
+    val payload: ByteArray,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+)
+
 /** Replica bookkeeping: whose notes these are (server and user id). */
 @Entity(tableName = "replica_meta")
 data class ReplicaMetaEntity(
