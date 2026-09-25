@@ -35,6 +35,9 @@ class YanaClient(
             store.lastServer = value
         }
 
+    /** The plain client the realtime socket dials with; its auth rides the query string, not a header. */
+    fun socketClient(): OkHttpClient = plain
+
     private var authApiFor: Pair<HttpUrl, AuthApi>? = null
     private var apiFor: Pair<String, YanaApi>? = null
 

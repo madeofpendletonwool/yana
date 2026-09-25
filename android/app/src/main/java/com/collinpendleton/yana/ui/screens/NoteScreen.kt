@@ -25,7 +25,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -34,7 +36,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.collinpendleton.yana.data.Note
 import com.collinpendleton.yana.data.NoteRepository
+import com.collinpendleton.yana.data.rt.SyncEngine
 import com.collinpendleton.yana.data.stripFrontmatter
+import com.collinpendleton.yana.ui.ConnectionDot
 import com.collinpendleton.yana.ui.Loader
 import com.collinpendleton.yana.ui.Placeholder
 import com.collinpendleton.yana.ui.formatTime
@@ -42,18 +46,32 @@ import com.collinpendleton.yana.ui.htmlnote.HtmlNotePane
 
 /**
  * A note: its title, where it lives, its tags, and its body — from the
- * server, or from the replica when the server is out of reach. Markdown
- * reads as text; HTML renders in a sandboxed WebView on the content
- * origin, with its source editable beside it (offline, the source
- * reads as text until the server returns). The markdown editor arrives
- * with the editor.
+ * server, or from the replica when the server is out of reach. A
+ * markdown note also joins the realtime document: its body is the
+ * CRDT's text once the local state loads or the first handshake
+ * lands, and the connection dot beside the title says whether edits
+ * are waiting, settling, or live. HTML renders in a sandboxed WebView
+ * on the content origin, with its source editable beside it (offline,
+ * the source reads as text until the server returns). The markdown
+ * editor arrives with the editor.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NoteScreen(repo: NoteRepository, id: String, title: String, onBack: () -> Unit) {
+fun NoteScreen(repo: NoteRepository, sync: SyncEngine, id: String, title: String, onBack: () -> Unit) {
     val vm: Loader<Note> = viewModel(key = "note:$id") { Loader(fetch = { repo.note(id) }) }
     val state by vm.loaded.collectAsStateWithLifecycle()
     val note = state.data
+
+    // Only markdown notes have a CRDT document; HTML notes edit by
+    // source and never join the relay.
+    val isHtml = note?.kind == "html"
+    val live = remember(id, isHtml) { if (isHtml) null else sync.open(id) }
+    DisposableEffect(id, isHtml) {
+        onDispose { live?.let { sync.close(id) } }
+    }
+    val liveText = live?.text?.collectAsStateWithLifecycle()?.value
+    val liveReady = live?.ready?.collectAsStateWithLifecycle()?.value == true
+    val status by sync.status.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -61,6 +79,9 @@ fun NoteScreen(repo: NoteRepository, id: String, title: String, onBack: () -> Un
                 title = { Text(note?.title?.ifEmpty { null } ?: title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                },
+                actions = {
+                    if (!isHtml) ConnectionDot(status, Modifier.padding(end = 20.dp))
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
@@ -85,7 +106,11 @@ fun NoteScreen(repo: NoteRepository, id: String, title: String, onBack: () -> Un
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     NoteHeader(note, Modifier.widthIn(max = 720.dp).fillMaxWidth())
-                    NoteBody(note, Modifier.widthIn(max = 720.dp).fillMaxWidth())
+                    NoteBody(
+                        note,
+                        liveBody = if (liveReady) liveText else null,
+                        modifier = Modifier.widthIn(max = 720.dp).fillMaxWidth(),
+                    )
                 }
             }
         }
@@ -124,18 +149,21 @@ private fun NoteHeader(note: Note, modifier: Modifier) {
 }
 
 @Composable
-private fun NoteBody(note: Note, modifier: Modifier) {
+private fun NoteBody(note: Note, liveBody: String?, modifier: Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         when {
             note.kind == "md" -> SelectionContainer {
                 Text(
-                    note.markdown?.let(::stripFrontmatter)?.ifBlank { null } ?: "This note is empty.",
+                    (
+                        liveBody?.ifBlank { null }
+                            ?: note.markdown?.let(::stripFrontmatter)?.ifBlank { null }
+                        ) ?: "This note is empty.",
                     style = MaterialTheme.typography.bodyLarge,
                 )
             }
             else -> Hint("This kind of note opens on the web for now.")
         }
-        Hint("Read-only on this device until the editor arrives.")
+        if (liveBody == null) Hint("Read-only on this device until the editor arrives.")
     }
 }
 

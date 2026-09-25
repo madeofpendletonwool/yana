@@ -3,9 +3,9 @@
 // artifact, so the app depends on `project(":crdt")` and gets the AAR's
 // classes and native libraries as if it were a library module. (An
 // Android library module cannot carry a local AAR; AGP refuses to bundle
-// one.) The AAR is a build artifact, not committed: until it is built this
-// project provides nothing, and nothing in the app calls into it before
-// the editor (Phase 12e).
+// one.) The AAR is a build artifact, not committed: the realtime sync
+// layer (Phase 12d) calls into it, so the app needs the AAR built first —
+// CI does, and `make android-crdt` does locally.
 val aar = file("libs/yana-crdt.aar")
 
 configurations.create("default") {
