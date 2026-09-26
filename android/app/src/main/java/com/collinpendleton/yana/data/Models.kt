@@ -252,3 +252,140 @@ data class SessionInfo(
     @SerialName("last_used_at") val lastUsedAt: String = "",
     val current: Boolean = false,
 )
+
+/** One revision of a note, as the git history holds it, renames followed. */
+@Serializable
+data class HistoryEntry(
+    val hash: String,
+    val name: String = "",
+    val email: String = "",
+    val date: String = "",
+    val subject: String = "",
+    /** Who the author is: person, agent, or filesystem. */
+    val kind: String = "person",
+    /** The note's path as of this revision; it differs from the current one after a move. */
+    val path: String = "",
+)
+
+@Serializable
+data class HistoryResponse(val entries: List<HistoryEntry> = emptyList())
+
+@Serializable
+data class HistoryDiffResponse(val diff: String = "")
+
+@Serializable
+data class RestoreNoteRequest(val revision: String, val path: String)
+
+@Serializable
+data class OkResponse(val ok: Boolean = false)
+
+/** One note a feed entry touched. [id] and [title] are present when the note still exists. */
+@Serializable
+data class ActivityChange(
+    val action: String = "modified", // added, modified, renamed, deleted
+    val path: String = "",
+    /** The previous path; renames only. */
+    val from: String? = null,
+    val id: String? = null,
+    val title: String? = null,
+)
+
+/** One feed entry: a commit, or a run of commits by one agent in a quiet stretch. */
+@Serializable
+data class ActivityEntry(
+    val author: String = "",
+    /** person, agent, or filesystem. */
+    val kind: String = "person",
+    val from: String = "",
+    val to: String = "",
+    /** The newest commit of the entry — where a "restore to here" lands. */
+    val commit: String = "",
+    val commits: Int = 1,
+    val changes: List<ActivityChange> = emptyList(),
+)
+
+@Serializable
+data class ActivityResponse(
+    val entries: List<ActivityEntry> = emptyList(),
+    @SerialName("next_cursor") val nextCursor: String = "",
+    val more: Boolean = false,
+    /** Whether this account may restore the space to a feed entry. */
+    @SerialName("restore_allowed") val restoreAllowed: Boolean = false,
+)
+
+/** One path a point-in-time restore would touch. */
+@Serializable
+data class PitChange(
+    val action: String = "changed", // added, changed, deleted, moved
+    val path: String = "",
+    /** The path the note holds now; moves only. */
+    val from: String? = null,
+    val id: String? = null,
+    val title: String? = null,
+)
+
+/** What restoring to a commit would do, reported before anything moves. */
+@Serializable
+data class PitPreview(
+    val commit: String = "",
+    val subject: String = "",
+    val author: String = "",
+    val date: String = "",
+    /** The scope the preview was computed for; "" is the whole tree. */
+    val space: String = "",
+    val added: Int = 0,
+    val changed: Int = 0,
+    val deleted: Int = 0,
+    val moved: Int = 0,
+    val changes: List<PitChange> = emptyList(),
+)
+
+@Serializable
+data class PitPreviewResponse(val preview: PitPreview? = null)
+
+@Serializable
+data class PitRestoreRequest(val commit: String, val space: String)
+
+/** What a restore did: the commit it landed and the tag that holds what stood before. */
+@Serializable
+data class RestoreSummary(
+    val ok: Boolean = false,
+    val commit: String = "",
+    val tag: String = "",
+    val added: Int = 0,
+    val changed: Int = 0,
+    val deleted: Int = 0,
+    val moved: Int = 0,
+)
+
+/** One row of the deleted-notes list: a note whose file is gone, with what a restore recovers it from. */
+@Serializable
+data class DeletedNoteRow(
+    val id: String,
+    val space: String = "",
+    val path: String = "",
+    val title: String = "",
+    val kind: String = "md",
+    val created: String = "",
+    @SerialName("deleted_at") val deletedAt: String = "",
+    @SerialName("trash_path") val trashPath: String? = null,
+    @SerialName("has_file") val hasFile: Boolean = false,
+    @SerialName("has_sidecar") val hasSidecar: Boolean = false,
+    @SerialName("in_history") val inHistory: Boolean = false,
+    val untracked: Boolean = false,
+)
+
+@Serializable
+data class DeletedNotesResponse(val entries: List<DeletedNoteRow> = emptyList())
+
+/** What bringing one deleted note back did. [from] says where the content came from: the trash, or the history. */
+@Serializable
+data class DeletedRestoreResult(
+    val ok: Boolean = false,
+    val path: String = "",
+    val conflict: Boolean = false,
+    val note: Note? = null,
+    /** True when the scan has not picked the note up yet; there is nothing to open. */
+    val deferred: Boolean = false,
+    val from: String = "",
+)
