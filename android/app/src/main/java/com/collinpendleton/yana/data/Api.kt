@@ -2,6 +2,7 @@ package com.collinpendleton.yana.data
 
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
@@ -55,6 +56,10 @@ interface YanaApi {
 
     @POST("api/notes")
     suspend fun createNote(@Body body: CreateNoteRequest): CreateNoteResponse
+
+    /** Ticks one task box through the server's CRDT write. */
+    @PATCH("api/tasks")
+    suspend fun tickTask(@Body body: TaskTickRequest)
 
     @POST("api/notes/{id}/move")
     suspend fun moveNote(@Path("id") id: String, @Body body: MoveRequest): retrofit2.Response<Unit>

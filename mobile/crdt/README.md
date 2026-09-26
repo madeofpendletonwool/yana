@@ -6,7 +6,9 @@ surface `gomobile bind` can generate a Kotlin API from, and adds the one
 piece the port's own mobile façade leaves out: an undo manager scoped to
 this device, so one person's undo never reverts someone else's text.
 Everything speaks the same V1 update bytes as the server and the web
-client, with no translation layer. Background and rationale:
+client, with no translation layer. It also carries the markdown render
+(the server's own goldmark engine), so the phone's reading view produces
+the same HTML as the web's by construction. Background and rationale:
 [docs/crdt-decision.md](../../docs/crdt-decision.md).
 
 ## Building the AAR
@@ -51,6 +53,8 @@ the `Makefile`:
 | `Crdt.newUndoManager(doc)` | `undo()`, `redo()`, stack sizes, scoped to this device's edits |
 | `doc.relativePositionJSON(index, assoc)` | a cursor anchor as the JSON relative position the web's awareness states carry |
 | `doc.resolveRelativePositionJSON(json)` | resolve such a position against the current text; -1 when it cannot resolve |
+| `Crdt.renderMarkdown(body)` | render a note body to HTML with the server's own goldmark engine, on the device |
+| `Crdt.wikiLinks(body)` | the distinct raw `[[targets]]` of a body, newline-joined — the extraction the render performed |
 
 Every mutating method returns the update it produced (nil when nothing
 changed), so a sync client can forward it without a second encode; the

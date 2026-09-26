@@ -10,7 +10,7 @@ ANDROIDAPI          ?= 24
 CRDT_AAR            ?= android/crdt/libs/yana-crdt.aar
 GOPATH_BIN          := $(shell go env GOPATH)/bin
 
-.PHONY: all web build test lint run docker android-crdt clean
+.PHONY: all web build test lint run docker android-crdt android-reader clean
 
 all: build
 
@@ -49,6 +49,16 @@ android-crdt:
 	mkdir -p $(dir $(CRDT_AAR))
 	$(GOPATH_BIN)/gomobile bind -target=android -androidapi=$(ANDROIDAPI) \
 		-javapkg com.collinpendleton.yana.crdt -o $(CRDT_AAR) ./mobile/crdt
+
+## android-reader: build the reader WebView's assets (the rich.ts bundle,
+## its stylesheet, and the page template) with the web toolchain and copy
+## them into the app's assets. Like the AAR, a build artifact: not
+## committed, rebuilt by `make android-reader` and by CI.
+android-reader: web
+	rm -rf android/app/src/main/assets/reader
+	mkdir -p android/app/src/main/assets/reader
+	cp web/dist/android/reader.html web/dist/android/reader.js web/dist/android/reader.css \
+		web/dist/android/fonts/* android/app/src/main/assets/reader/
 
 clean:
 	rm -f yana

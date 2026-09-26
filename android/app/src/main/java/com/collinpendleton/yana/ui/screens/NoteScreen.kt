@@ -1,5 +1,6 @@
 package com.collinpendleton.yana.ui.screens
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -9,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -26,44 +26,61 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.collinpendleton.yana.data.Note
 import com.collinpendleton.yana.data.NoteRepository
+import com.collinpendleton.yana.data.markdownBody
 import com.collinpendleton.yana.data.rt.SyncEngine
-import com.collinpendleton.yana.data.stripFrontmatter
 import com.collinpendleton.yana.ui.ConnectionDot
 import com.collinpendleton.yana.ui.Loader
 import com.collinpendleton.yana.ui.Placeholder
 import com.collinpendleton.yana.ui.formatTime
 import com.collinpendleton.yana.ui.editor.MarkdownEditor
 import com.collinpendleton.yana.ui.htmlnote.HtmlNotePane
+import com.collinpendleton.yana.ui.reader.ReaderPane
+import com.collinpendleton.yana.ui.theme.ThemeMode
+import com.collinpendleton.yana.yana
 
 /**
  * A note: its title, where it lives, its tags, and its body — from the
  * server, or from the replica when the server is out of reach. A
- * markdown note also joins the realtime document: its body is the
- * CRDT's text once the local state loads or the first handshake
- * lands, the connection dot beside the title says whether edits are
- * waiting, settling, or live, and the edit button opens the editor
- * bound to that document. HTML renders in a sandboxed WebView on the
- * content origin, with its source editable beside it (offline, the
- * source reads as text until the server returns).
+ * markdown note reads rendered (the shared Go engine on the device, the
+ * web's own rich runtime in a sandboxed WebView over app assets) and
+ * joins the realtime document: the body is the CRDT's text once the
+ * local state loads or the first handshake lands, the connection dot
+ * beside the title says whether edits are waiting, settling, or live,
+ * and the edit button opens the editor bound to that document. HTML
+ * renders in a sandboxed WebView on the content origin, with its source
+ * editable beside it (offline, the source reads as text until the
+ * server returns).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NoteScreen(repo: NoteRepository, sync: SyncEngine, id: String, title: String, onBack: () -> Unit) {
+fun NoteScreen(
+    repo: NoteRepository,
+    sync: SyncEngine,
+    id: String,
+    title: String,
+    onBack: () -> Unit,
+    onOpenNote: (String) -> Unit = {},
+    onTag: (String) -> Unit = {},
+) {
+    val app = LocalContext.current.yana
     val vm: Loader<Note> = viewModel(key = "note:$id") { Loader(fetch = { repo.note(id) }) }
     val state by vm.loaded.collectAsStateWithLifecycle()
     val note = state.data
@@ -80,6 +97,14 @@ fun NoteScreen(repo: NoteRepository, sync: SyncEngine, id: String, title: String
     val status by sync.status.collectAsStateWithLifecycle()
     var editing by rememberSaveable(id) { mutableStateOf(false) }
     val canEdit = !isHtml && note?.role != "viewer"
+    val mode by app.prefs.themeMode.collectAsStateWithLifecycle()
+    val dark = when (mode) {
+        ThemeMode.System -> isSystemInDarkTheme()
+        ThemeMode.Light -> false
+        ThemeMode.Dark -> true
+    }
+    val context = LocalContext.current
+    val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
 
     Scaffold(
         topBar = {
@@ -125,16 +150,29 @@ fun NoteScreen(repo: NoteRepository, sync: SyncEngine, id: String, title: String
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                Column(
-                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    NoteHeader(note, Modifier.widthIn(max = 720.dp).fillMaxWidth())
-                    NoteBody(
-                        note,
-                        liveBody = if (liveReady) liveText else null,
-                        modifier = Modifier.widthIn(max = 720.dp).fillMaxWidth(),
-                    )
+                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+                    ) {
+                        NoteHeader(note, Modifier.widthIn(max = 720.dp).fillMaxWidth())
+                    }
+                    // The reader scrolls itself; the body it renders is the
+                    // live document's text once that loads, the cached file
+                    // until then.
+                    val body = if (liveReady) liveText else note.markdown?.let(::markdownBody)
+                    key(note.id, dark) {
+                        ReaderPane(
+                            repo = repo,
+                            client = app.client,
+                            note = note,
+                            body = body,
+                            dark = dark,
+                            onOpenNote = onOpenNote,
+                            onTag = onTag,
+                            onToast = toast,
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                        )
+                    }
                 }
             }
         }
@@ -170,27 +208,4 @@ private fun NoteHeader(note: Note, modifier: Modifier) {
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
-}
-
-@Composable
-private fun NoteBody(note: Note, liveBody: String?, modifier: Modifier) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        when {
-            note.kind == "md" -> SelectionContainer {
-                Text(
-                    (
-                        liveBody?.ifBlank { null }
-                            ?: note.markdown?.let(::stripFrontmatter)?.ifBlank { null }
-                        ) ?: "This note is empty.",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-            }
-            else -> Hint("This kind of note opens on the web for now.")
-        }
-    }
-}
-
-@Composable
-private fun Hint(text: String) {
-    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp))
 }

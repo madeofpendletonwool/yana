@@ -91,6 +91,18 @@ data class TreeNode(
     val label: String get() = if (isDir) name else title?.ifEmpty { null } ?: name
 }
 
+/** One [[wikilink]] of a note, as the server resolved it at index time. */
+@Serializable
+data class ServerLink(
+    @SerialName("raw_target") val rawTarget: String = "",
+    @SerialName("to_id") val toId: String? = null,
+    val resolved: Boolean = false,
+)
+
+/** A task tick: one checkbox of one note, set open or done. */
+@Serializable
+data class TaskTickRequest(val note: String, val line: Int, val done: Boolean)
+
 @Serializable
 data class Note(
     val id: String,
@@ -109,6 +121,9 @@ data class Note(
     val public: Boolean = false,
     val trusted: Boolean = false,
     @SerialName("content_hash") val contentHash: String = "",
+    /** The note's directory, for resolving relative images and create paths. */
+    val base: String = "",
+    val links: List<ServerLink> = emptyList(),
 )
 
 /** The content-origin URL a rendered HTML note loads, signed for a few minutes. */

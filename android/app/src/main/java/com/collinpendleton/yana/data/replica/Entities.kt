@@ -103,8 +103,8 @@ data class TreeNodeEntity(
 
 /**
  * One offline action waiting for the network: create a note, append to
- * one, or move one. Payload is the op's JSON; replay drains the queue in
- * order.
+ * one, move one, or tick a task box. Payload is the op's JSON; replay
+ * drains the queue in order.
  */
 @Entity(tableName = "pending_ops")
 data class PendingOpEntity(

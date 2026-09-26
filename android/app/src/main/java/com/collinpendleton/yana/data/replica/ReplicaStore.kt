@@ -17,7 +17,7 @@ import com.collinpendleton.yana.data.rt.OutboxRow
 import java.time.Instant
 import kotlinx.serialization.Serializable
 
-/** The JSON payloads of the three offline operations. */
+/** The JSON payloads of the offline operations. */
 @Serializable
 data class CreateOp(val space: String, val path: String, val content: String)
 
@@ -26,6 +26,10 @@ data class AppendOp(val noteId: String, val text: String)
 
 @Serializable
 data class MoveOp(val noteId: String, val toPath: String)
+
+/** One task tick: the line is the body line the rendered box carries. */
+@Serializable
+data class TaskOp(val noteId: String, val line: Int, val done: Boolean)
 
 @Serializable
 sealed interface OpPayload {
@@ -37,6 +41,9 @@ sealed interface OpPayload {
 
     @Serializable
     data class Move(val op: MoveOp) : OpPayload
+
+    @Serializable
+    data class Task(val op: TaskOp) : OpPayload
 }
 
 /** One pending operation, decoded. */
@@ -138,6 +145,27 @@ class ReplicaStore(private val db: ReplicaDatabase) : com.collinpendleton.yana.d
     /** One cached note's raw text (markdown body or HTML source), or null. */
     suspend fun rawBody(id: String): String? = dao.bodyOf(id)?.rawBody
 
+    /**
+     * Flips a task box's `[ ]` / `[x]` character on one line of the
+     * cached body, the same minimal edit the server's tick makes, so an
+     * offline tick reads back ticked. Lines are counted from the start
+     * of the body, the numbering the rendered checkbox carries. Returns
+     * the flipped body, or null when there is nothing to flip (no cached
+     * body, no line, no marker, or already in the asked state).
+     */
+    suspend fun flipCachedTask(noteId: String, line: Int, done: Boolean): String? {
+        val row = dao.noteById(noteId) ?: return null
+        val raw = dao.bodyOf(noteId)?.rawBody ?: return null
+        val next = flipTaskLine(raw, line, done) ?: return null
+        val (body, rawNext) = indexText(row.kind, next)
+        dao.storeBody(noteId, body, rawNext)
+        return rawNext
+    }
+
+    /** Every note of one space, the refs wikilink resolution runs over. */
+    suspend fun spaceNoteRefs(space: String): List<com.collinpendleton.yana.data.NoteRef> =
+        dao.notesIn(space).map { com.collinpendleton.yana.data.NoteRef(it.id, it.relPath) }
+
     /** Runs a parsed query against the local index, with the server's semantics. */
     suspend fun search(query: SearchQuery, space: String?, limit: Int = 50): List<LocalHit> {
         val built = buildSearchQuery(query, space, limit)
@@ -164,6 +192,7 @@ class ReplicaStore(private val db: ReplicaDatabase) : com.collinpendleton.yana.d
     suspend fun enqueueCreate(op: CreateOp) = enqueue("create", YanaJson.encodeToString(OpPayload.serializer(), OpPayload.Create(op)))
     suspend fun enqueueAppend(op: AppendOp) = enqueue("append", YanaJson.encodeToString(OpPayload.serializer(), OpPayload.Append(op)))
     suspend fun enqueueMove(op: MoveOp) = enqueue("move", YanaJson.encodeToString(OpPayload.serializer(), OpPayload.Move(op)))
+    suspend fun enqueueTask(op: TaskOp) = enqueue("task", YanaJson.encodeToString(OpPayload.serializer(), OpPayload.Task(op)))
 
     private suspend fun enqueue(type: String, payload: String) {
         dao.addPendingOp(PendingOpEntity(type = type, payload = payload, createdAt = System.currentTimeMillis()))
@@ -230,4 +259,24 @@ data class LocalHit(
 internal fun epochNanos(s: String): Long {
     val t: Instant = parseInstant(s) ?: return 0
     return t.epochSecond * 1_000_000_000L + t.nano
+}
+
+private val taskBox = Regex("""\[([ xX])]""")
+
+/**
+ * Sets the box on [line] (counted from the body's first line, the
+ * numbering the rendered checkbox's data-line carries) to [done], the
+ * server's flipTaskLine: the minimal edit, x for a tick and a space for
+ * an untick. Null when the line holds no box or already sits in the
+ * asked state.
+ */
+internal fun flipTaskLine(body: String, line: Int, done: Boolean): String? {
+    val lines = body.split('\n')
+    if (line < 0 || line >= lines.size) return null
+    val text = lines[line]
+    val m = taskBox.find(text) ?: return null
+    val was = m.groupValues[1] != " "
+    if (was == done) return null
+    val next = text.replaceRange(m.range, if (done) "[x]" else "[ ]")
+    return (lines.subList(0, line) + next + lines.subList(line + 1, lines.size)).joinToString("\n")
 }

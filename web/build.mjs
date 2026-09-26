@@ -125,6 +125,27 @@ const exportRichCtx = await esbuild.context({
   plugins: [woff2Only],
 })
 
+// The Android reader's runtime: the same rich.ts bundle the exports get,
+// plus the reader's stylesheet (KaTeX's included, woff2 fonts beside it)
+// and its page template, at stable names under dist/android/. The Makefile
+// copies these into the app's assets (make android-reader); the reader
+// page loads them through WebViewAssetLoader with no network.
+const androidCtx = await esbuild.context({
+  entryPoints: { reader: 'src/android-reader.ts' },
+  assetNames: 'fonts/[name]',
+  bundle: true,
+  minify: true,
+  sourcemap: false,
+  target: ['es2020'],
+  format: 'iife',
+  loader: { '.woff2': 'file' },
+  outdir: 'dist/android',
+  logLevel: 'info',
+  plugins: [woff2Only],
+})
+mkdirSync('dist/android', { recursive: true })
+copyFileSync('src/android-reader.html', 'dist/android/reader.html')
+
 // --- icons and manifest ---------------------------------------------------
 
 // The icon set lives in icons/ and is copied as-is: the favicon in .ico
@@ -199,5 +220,7 @@ if (watch) {
   await exportCtx.dispose()
   await exportRichCtx.rebuild()
   await exportRichCtx.dispose()
+  await androidCtx.rebuild()
+  await androidCtx.dispose()
   writeServiceWorker()
 }

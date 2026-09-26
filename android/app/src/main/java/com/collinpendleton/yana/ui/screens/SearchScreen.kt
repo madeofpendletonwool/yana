@@ -53,9 +53,10 @@ fun SearchScreen(
     repo: NoteRepository,
     onBack: () -> Unit,
     onNote: (id: String, title: String) -> Unit,
+    initialQuery: String = "",
 ) {
-    var query by rememberSaveable { mutableStateOf("") }
-    var run by rememberSaveable { mutableStateOf(0) }
+    var query by rememberSaveable { mutableStateOf(initialQuery) }
+    var run by rememberSaveable { mutableStateOf(if (initialQuery.isBlank()) 0 else 1) }
     val vm: Loader<List<SearchResult>> = viewModel(key = "search") {
         Loader(fetch = {
             // A brief settle so typing does not fire a search per letter.

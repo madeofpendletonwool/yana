@@ -3,38 +3,74 @@
 The Android client: Kotlin, Jetpack Compose, Material 3. It signs in to a
 YANA/ server and browses its spaces, folders and notes, with an offline
 replica (Room) that keeps the tree, note reading, and search working in
-airplane mode. HTML notes render in a sandboxed WebView and edit by
-source; markdown notes edit live through the shared document: a plain
-text field whose changes become document operations, with undo scoped
-to this device and other people's cursors drawn in their colors.
+airplane mode. Markdown notes read rendered — headings, lists, code,
+tables, callouts, mermaid diagrams, math, images, tappable wikilinks and
+tags, and task boxes that tick — and edit live through the shared
+document: a plain text field whose changes become document operations,
+with undo scoped to this device and other people's cursors drawn in
+their colors. HTML notes render in a sandboxed WebView and edit by
+source.
 
 ## Build
 
 ```sh
 make android-crdt             # at the repo root: builds the CRDT AAR the app needs
+make android-reader           # at the repo root: builds the reader WebView's assets
 cd android
 ./gradlew build              # lint, unit tests, debug and release builds
 ./gradlew assembleDebug      # just the debug APK
 ./gradlew installDebug       # onto a running emulator or a connected phone
-./gradlew connectedDebugAndroidTest  # the WebView sandbox test, on a device
+./gradlew connectedDebugAndroidTest  # the WebView sandbox tests, on a device
 ```
 
 The debug APK lands at `app/build/outputs/apk/debug/app-debug.apk` and
 installs beside a release build (`com.collinpendleton.yana.debug`). CI
-runs `make android-crdt` and then `./gradlew build` on every pull
-request that touches `android/` and attaches the debug APK to the run
-as `yana-debug-apk`.
+runs `make android-crdt` and `make android-reader` and then
+`./gradlew build` on every pull request that touches `android/` and
+attaches the debug APK to the run as `yana-debug-apk`.
 
 The CRDT AAR needs a JDK (17+), the Android SDK with the pinned NDK,
 and Go; see [mobile/crdt/README.md](../mobile/crdt/README.md). Without
 it the app does not compile — the realtime sync layer calls into it —
 so build it first.
 
+The reader assets (the reader page, its script, its stylesheet and the
+KaTeX fonts under `app/src/main/assets/reader/`) are a build artifact
+too: `make android-reader` runs the web toolchain over
+`web/src/android-reader.*` and copies the output in. Without them the
+gradle build fails with the instruction to run it.
+
 The instrumented tests (`./gradlew connectedDebugAndroidTest`, emulator
 or device attached) check the offline search against the fixture corpus
 in `app/src/androidTest/assets/searchfixtures/`; see
 [docs/android-offline-search.md](../docs/android-offline-search.md)
-for how that corpus is generated and what parity it pins.
+for how that corpus is generated and what parity it pins. The reader's
+sandbox test (`ReaderSandboxTest`) proves a note's injected markup
+cannot run in the reading view.
+
+## The reading view
+
+A markdown note reads the way it reads on the web: the same goldmark
+engine the server renders with runs on the device through the bind
+package (`Crdt.renderMarkdown`), and the reader page — an APK asset
+built from the web's own sources (`web/src/android-reader.*`: the
+rich.ts runtime with mermaid and KaTeX bundled, the app.css tokens and
+markdown styles) — draws it in a WebView over `WebViewAssetLoader`:
+no network from the page, scripts only from the app's assets, file
+access off, and no bridge back to the app. Taps (a wikilink, a dashed
+link, a tag, a task box) leave as `yana://` navigations the
+`WebViewClient` answers; external links go to the system browser.
+Wikilinks resolve from the note payload when online, or against the
+replica with the server's own resolution rules when not; a dashed link
+creates the note at the path the web would (offline, through the
+`pending_ops` queue). Task boxes tick through `PATCH /api/tasks`; a
+tick offline queues as a pending op and the box reads back ticked.
+`_assets/` images load through the app's fetcher with the auth header
+and a disk cache, so the token never enters the page.
+
+When Phase 29 (aliases and embeds) lands, `![[note]]` embeds render
+through the same path; the render side of the engine is shared, so
+nothing new is needed here beyond picking the bundle up.
 
 Put the SDK location in `android/local.properties`
 (`sdk.dir=/path/to/Android/sdk`) or set `ANDROID_HOME`. Android Studio

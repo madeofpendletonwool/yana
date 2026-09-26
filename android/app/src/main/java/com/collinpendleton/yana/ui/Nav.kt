@@ -26,7 +26,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object SpacesRoute
 @Serializable data class SpaceRoute(val name: String, val label: String)
 @Serializable data class NoteRoute(val id: String, val title: String)
-@Serializable data object SearchRoute
+@Serializable data class SearchRoute(val query: String = "")
 @Serializable data object SettingsRoute
 
 @Composable
@@ -63,7 +63,7 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
             SpacesScreen(
                 repo = app.repo,
                 onSpace = { nav.navigate(SpaceRoute(it.name, it.displayName)) },
-                onSearch = { nav.navigate(SearchRoute) },
+                onSearch = { nav.navigate(SearchRoute()) },
                 onSettings = { nav.navigate(SettingsRoute) },
             )
         }
@@ -79,11 +79,22 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
         }
         composable<NoteRoute> { entry ->
             val r = entry.toRoute<NoteRoute>()
-            NoteScreen(repo = app.repo, sync = app.syncEngine, id = r.id, title = r.title, onBack = { nav.popBackStack() })
+            NoteScreen(
+                repo = app.repo,
+                sync = app.syncEngine,
+                id = r.id,
+                title = r.title,
+                onBack = { nav.popBackStack() },
+                onOpenNote = { id -> nav.navigate(NoteRoute(id, "")) },
+                // Until the tag page lands (12k), a tag opens its search.
+                onTag = { tag -> nav.navigate(SearchRoute(query = "tag:$tag")) },
+            )
         }
-        composable<SearchRoute> {
+        composable<SearchRoute> { entry ->
+            val r = entry.toRoute<SearchRoute>()
             SearchScreen(
                 repo = app.repo,
+                initialQuery = r.query,
                 onBack = { nav.popBackStack() },
                 onNote = { id, title -> nav.navigate(NoteRoute(id, title)) },
             )
