@@ -1,10 +1,9 @@
 package com.collinpendleton.yana.ui.screens
 
-import androidx.compose.foundation.clickable
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -13,20 +12,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -37,41 +32,81 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.collinpendleton.yana.BuildConfig
 import com.collinpendleton.yana.YanaApp
-import com.collinpendleton.yana.data.SessionInfo
-import com.collinpendleton.yana.data.normalizeServerUrl
-import com.collinpendleton.yana.data.display
-import com.collinpendleton.yana.ui.Loader
+import com.collinpendleton.yana.data.GuideRequest
+import com.collinpendleton.yana.data.TreeNode
+import com.collinpendleton.yana.data.userMessage
 import com.collinpendleton.yana.ui.Wordmark
+import com.collinpendleton.yana.ui.openUrl
 import com.collinpendleton.yana.ui.theme.ThemeMode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-/** Account, appearance, data, and about. */
+/**
+ * Settings the phone's way: the sections a thumb reaches (account,
+ * sharing, people, appearance, data, help) and rows that open the
+ * signed-in server on the web for the work that wants a keyboard
+ * (agents, backups, site export, conventions).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     app: YanaApp,
     onBack: () -> Unit,
-    onDeletedNotes: () -> Unit = {},
-    onConflicts: () -> Unit = {},
+    onAccount: () -> Unit = {},
+    onSpacesSettings: () -> Unit = {},
+    onPeople: () -> Unit = {},
+    onData: () -> Unit = {},
+    onOpenNote: (id: String, title: String) -> Unit = { _, _ -> },
 ) {
     val client = app.client
     val session by client.session.collectAsStateWithLifecycle()
     val mode by app.prefs.themeMode.collectAsStateWithLifecycle()
-    val sessions: Loader<List<SessionInfo>> = viewModel { Loader(fetch = { client.api().sessions().sessions }) }
-    val device by sessions.loaded.collectAsStateWithLifecycle()
-    // The Data page's conflict count: a hint for the row, not a fact
-    // the screen depends on — a failure reads as unknown.
-    val conflicts: Loader<Int> = viewModel(key = "conflict-count") { Loader(fetch = { app.repo.conflicts().size }) }
-    val conflictCount by conflicts.loaded.collectAsStateWithLifecycle()
-    var confirming by remember { mutableStateOf(false) }
-    var signingOut by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
+    var helpBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    /** Opens the web app at one of its settings sections. */
+    fun openWeb(section: String) {
+        val server = session?.server?.trimEnd('/') ?: return
+        openUrl(context, "$server/settings/$section")
+    }
+
+    /** Opens the Start here note, making it when the server does not have it. */
+    fun openStartHere() {
+        if (helpBusy) return
+        helpBusy = true
+        scope.launch {
+            try {
+                val spaces = app.repo.spaces()
+                val trees = spaces.associate { it.name to app.repo.tree(it.name) }
+                val found = findStartHere(trees.values)
+                if (found?.id != null) {
+                    onOpenNote(found.id, found.title?.ifEmpty { null } ?: "Start here")
+                } else {
+                    val space = spaces.firstOrNull { it.name.isNotEmpty() }?.name ?: ""
+                    val guide = client.api().guide(GuideRequest(space))
+                    if (guide.id != null) {
+                        onOpenNote(guide.id, "Start here")
+                    } else {
+                        toast("The Start here note was just written; it appears after the server's next scan.")
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                toast(e.userMessage())
+            } finally {
+                helpBusy = false
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -90,19 +125,26 @@ fun SettingsScreen(
         ) {
             Column(Modifier.widthIn(max = 560.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Section("Account")
-                session?.let { s ->
-                    Field("Signed in as", s.username + if (s.isOwner) ", the server's owner" else "")
-                    Field("Server", normalizeServerUrl(s.server)?.display() ?: s.server)
-                }
-                device.data?.firstOrNull { it.current }?.let {
-                    Field("This device", it.label.ifEmpty { "unnamed" })
-                }
-                Text(
-                    "Signing out ends this device's session on the server. Other devices stay signed in.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                SettingsRow(
+                    title = "Account",
+                    blurb = "Your password, and every device signed in.",
+                    onClick = onAccount,
                 )
-                OutlinedButton(onClick = { confirming = true }, enabled = !signingOut) { Text("Sign out") }
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                Section("Sharing")
+                SettingsRow(
+                    title = "Spaces and sharing",
+                    blurb = "Who can see and edit each space.",
+                    onClick = onSpacesSettings,
+                )
+                if (session?.isOwner == true) {
+                    SettingsRow(
+                        title = "People",
+                        blurb = "The accounts on this server.",
+                        onClick = onPeople,
+                    )
+                }
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 Section("Appearance")
@@ -119,50 +161,44 @@ fun SettingsScreen(
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 Section("Data")
-                Row(
-                    Modifier.fillMaxWidth().clickable(onClick = onDeletedNotes).padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Deleted notes", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "Notes whose files are gone, each restorable to where it lived.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                SettingsRow(
+                    title = "Data",
+                    blurb = "Deleted notes, conflicts, and a space as a zip.",
+                    onClick = onData,
+                )
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                Section("Help")
+                SettingsRow(
+                    title = "Start here",
+                    blurb = "The guide note: how links, pictures, tasks and tags work.",
+                    onClick = { openStartHere() },
+                )
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                Section("On the web")
+                if (session?.isOwner == true) {
+                    SettingsRow(
+                        title = "Agents",
+                        blurb = "Keys for tools that read and write notes over MCP.",
+                        onClick = { openWeb("agents") },
+                    )
+                    SettingsRow(
+                        title = "Backups",
+                        blurb = "The history pushed to other repositories, and restore from one.",
+                        onClick = { openWeb("data") },
                     )
                 }
-                Row(
-                    Modifier.fillMaxWidth().clickable(onClick = onConflicts).padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Conflicts", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            when (val n = conflictCount.data) {
-                                null -> "Copies parked beside a note when two writes met the same path."
-                                1 -> "1 conflict copy waits — two writes met the same path."
-                                else -> "$n conflict copies wait — two writes met the same path."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (conflictCount.data != null && conflictCount.data!! > 0) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                SettingsRow(
+                    title = "Site export",
+                    blurb = "A space as a site that stands on its own, from the web's data page.",
+                    onClick = { openWeb("data") },
+                )
+                SettingsRow(
+                    title = "Space conventions",
+                    blurb = "CONVENTIONS.md, the brief a space gives its agents — the web's agents page.",
+                    onClick = { openWeb("agents") },
+                )
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 Section("About")
@@ -170,22 +206,18 @@ fun SettingsScreen(
             }
         }
     }
+}
 
-    if (confirming) {
-        AlertDialog(
-            onDismissRequest = { confirming = false },
-            title = { Text("Sign out of this device?") },
-            text = { Text("Notes stay on the server. Sign in again to see them here.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirming = false
-                    signingOut = true
-                    scope.launch { client.signOut() }
-                }) { Text("Sign out") }
-            },
-            dismissButton = { TextButton(onClick = { confirming = false }) { Text("Cancel") } },
-        )
+/** The Start here note across the loaded trees — the same find the web's help makes. */
+fun findStartHere(trees: Iterable<List<TreeNode>>): TreeNode? {
+    fun walk(nodes: List<TreeNode>): TreeNode? {
+        for (n in nodes) {
+            if (!n.isDir && n.name == "Start here.md") return n
+            walk(n.children)?.let { return it }
+        }
+        return null
     }
+    return trees.asSequence().mapNotNull { walk(it) }.firstOrNull()
 }
 
 @Composable
@@ -200,24 +232,11 @@ private fun About() {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        HorizontalDivider(Modifier.padding(top = 16.dp).width(48.dp), color = MaterialTheme.colorScheme.outline)
+        HorizontalDivider(Modifier.padding(top = 16.dp).widthIn(max = 48.dp), color = MaterialTheme.colorScheme.outline)
         Text(
             "1. Yet Another Notes App.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-    }
-}
-
-@Composable
-private fun Section(title: String) {
-    Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-}
-
-@Composable
-private fun Field(label: String, value: String) {
-    Column {
-        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyLarge)
     }
 }

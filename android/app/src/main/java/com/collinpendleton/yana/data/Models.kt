@@ -252,7 +252,76 @@ data class SessionInfo(
     val label: String = "",
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("last_used_at") val lastUsedAt: String = "",
+    /** When the session lapses; an empty string when the server did not say. */
+    @SerialName("expires_at") val expiresAt: String = "",
+    /** Set the moment a session is revoked; null while it lives. */
+    @SerialName("revoked_at") val revokedAt: String? = null,
     val current: Boolean = false,
+)
+
+/** One account row of the owner's People list. */
+@Serializable
+data class UserInfo(
+    val id: String,
+    val username: String = "",
+    @SerialName("is_owner") val isOwner: Boolean = false,
+    @SerialName("created_at") val createdAt: String = "",
+)
+
+@Serializable
+data class UsersResponse(val users: List<UserInfo> = emptyList())
+
+@Serializable
+data class CreateUserRequest(val username: String, val password: String)
+
+@Serializable
+data class PasswordRequest(val password: String)
+
+/** One member of a space, as the owner's view of it carries. */
+@Serializable
+data class SpaceMemberRow(
+    val user: String,
+    val role: String = "",
+    val id: String? = null,
+    val username: String? = null,
+) {
+    /** The name a row shows: the account's username when the reference resolved. */
+    val displayName: String get() = username?.ifEmpty { null } ?: user
+}
+
+/** One space as `GET /api/spaces/{space}` answers: the caller's role, and the member list for an owner. */
+@Serializable
+data class SpaceDetail(
+    val name: String = "",
+    val label: String = "",
+    val role: String = "",
+    val members: List<SpaceMemberRow> = emptyList(),
+)
+
+/** A member as `PATCH /api/spaces/{space}` writes it: a username or id, and one of the three roles. */
+@Serializable
+data class MemberSpec(val user: String, val role: String)
+
+/** The whole of a space's sharing at once: the label and the member list, replaced. */
+@Serializable
+data class UpdateSpaceRequest(val name: String, val members: List<MemberSpec>)
+
+@Serializable
+data class CreateSpaceRequest(val name: String)
+
+@Serializable
+data class CreateSpaceResponse(val name: String = "")
+
+/** Asks the server for the Start here note, making it in [space] when absent. */
+@Serializable
+data class GuideRequest(val space: String)
+
+/** The guide answer: [id] is absent when the note was written but not yet indexed. */
+@Serializable
+data class GuideResponse(
+    val id: String? = null,
+    val path: String = "",
+    val created: Boolean = false,
 )
 
 /** One revision of a note, as the git history holds it, renames followed. */

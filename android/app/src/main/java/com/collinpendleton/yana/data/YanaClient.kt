@@ -3,10 +3,13 @@ package com.collinpendleton.yana.data
 import android.os.Build
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -81,6 +84,33 @@ class YanaClient(
             // Offline or already revoked: the local session goes regardless.
         }
         store.save(null)
+    }
+
+    /**
+     * One space's notes as a zip (`GET /api/spaces/{space}/export/notes.zip`),
+     * downloaded with this session's auth so it can be handed to the share
+     * sheet. The root of the tree has no zip of its own; it exports on the web.
+     */
+    suspend fun exportNotesZip(space: String): ByteArray {
+        if (space.isEmpty()) throw IOException("the root of the tree exports from the web")
+        val base = normalizeServerUrl(store.session.value?.server ?: throw NotSignedIn()) ?: throw NotSignedIn()
+        val url = base.newBuilder()
+            .addPathSegments("api/spaces")
+            .addPathSegment(space)
+            .addPathSegments("export/notes.zip")
+            .build()
+        val request = Request.Builder().url(url).build()
+        return withContext(Dispatchers.IO) {
+            authed.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    val error = runCatching {
+                        YanaJson.decodeFromString(ApiErrorBody.serializer(), resp.body.string()).error
+                    }.getOrNull()
+                    throw IOException(error?.replaceFirstChar { it.uppercase() } ?: "The server answered HTTP ${resp.code}.")
+                }
+                resp.body.bytes()
+            }
+        }
     }
 
     class NotSignedIn : IOException("not signed in")
