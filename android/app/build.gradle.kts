@@ -5,6 +5,25 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// The reader WebView's assets are a build artifact of the web toolchain
+// (make android-reader, like the CRDT AAR): the page template, its
+// script (the web's rich runtime bundled), and its stylesheet with the
+// KaTeX fonts. Without them the reader cannot load; fail the build with
+// the fix rather than shipping an app that renders nothing.
+val readerAssetsDir = layout.projectDirectory.dir("src/main/assets/reader")
+tasks.register("checkReaderAssets") {
+    val dir = readerAssetsDir
+    doLast {
+        val missing = listOf("reader.html", "reader.js", "reader.css").filterNot { dir.file(it).asFile.exists() }
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                "reader assets missing: ${missing.joinToString()} — run `make android-reader` at the repo root",
+            )
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn("checkReaderAssets") }
+
 android {
     namespace = "com.collinpendleton.yana"
     compileSdk = 37
@@ -65,6 +84,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.webkit)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

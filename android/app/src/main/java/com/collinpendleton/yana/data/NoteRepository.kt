@@ -6,6 +6,7 @@ import com.collinpendleton.yana.data.replica.LocalHit
 import com.collinpendleton.yana.data.replica.MoveOp
 import com.collinpendleton.yana.data.replica.OpPayload
 import com.collinpendleton.yana.data.replica.ReplicaStore
+import com.collinpendleton.yana.data.replica.TaskOp
 import com.collinpendleton.yana.data.search.parseQuery
 import java.io.IOException
 import java.time.Instant
@@ -58,8 +59,46 @@ interface NoteRepository {
     suspend fun enqueueAppend(noteId: String, text: String)
     suspend fun enqueueMove(noteId: String, toPath: String)
 
+    /**
+     * Ticks a task box while reading: through the server's endpoint when
+     * it can be reached, queued as a pending op (and flipped in the
+     * cached body, so it reads back ticked) when it cannot.
+     */
+    suspend fun tickTask(noteId: String, line: Int, done: Boolean): TickOutcome
+
+    /**
+     * The note a dashed wikilink creates, made now when the server is
+     * reachable; offline the create queues and returns null — there is
+     * no id to open until the next sync replays it.
+     */
+    suspend fun createNoteAt(path: String): String?
+
+    /**
+     * The note's wikilinks resolved against the body the reader is
+     * rendering: the payload's rows when the server sent them, the
+     * replica's own resolution otherwise, so links work in airplane
+     * mode too.
+     */
+    suspend fun resolveLinks(note: Note, body: String): List<ResolvedLink>
+
     /** How many offline actions wait for the network. */
     val pendingCount: Flow<Int>
+}
+
+/** What a tick did. */
+sealed interface TickOutcome {
+    /** The server took it (or the box already sat that way). */
+    data object Done : TickOutcome
+
+    /**
+     * The server was out of reach; the op is queued and the cached body
+     * flipped, so the box reads back ticked. [body] is that flipped
+     * body, when a cached one existed.
+     */
+    data class Queued(val body: String?) : TickOutcome
+
+    /** The server refused it (a viewer's space, the note gone, the line moved). */
+    data class Refused(val message: String) : TickOutcome
 }
 
 /** One search result, the same shape whether the server or the replica produced it. */
@@ -161,6 +200,56 @@ class YanaNoteRepository(
     override suspend fun enqueueMove(noteId: String, toPath: String) =
         store.enqueueMove(MoveOp(noteId, toPath))
 
+    override suspend fun tickTask(noteId: String, line: Int, done: Boolean): TickOutcome {
+        bind()
+        return try {
+            client.api().tickTask(TaskTickRequest(note = noteId, line = line, done = done))
+            TickOutcome.Done
+        } catch (e: YanaClient.NotSignedIn) {
+            throw e
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            // Offline: the tick rides with the next sync and the cached
+            // body flips now, so the box reads back ticked.
+            store.enqueueTask(TaskOp(noteId, line, done))
+            val flipped = store.flipCachedTask(noteId, line, done)
+            TickOutcome.Queued(flipped)
+        } catch (e: HttpException) {
+            TickOutcome.Refused(e.userMessage())
+        }
+    }
+
+    override suspend fun createNoteAt(path: String): String? {
+        bind()
+        return try {
+            client.api().createNote(CreateNoteRequest(path = path, content = "")).id.ifEmpty { null }
+        } catch (e: YanaClient.NotSignedIn) {
+            throw e
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            val space = path.substringBefore('/', "")
+            store.enqueueCreate(CreateOp(space, path, ""))
+            null
+        } catch (_: HttpException) {
+            null
+        }
+    }
+
+    override suspend fun resolveLinks(note: Note, body: String): List<ResolvedLink> {
+        // The server's rows are authoritative when the payload carried
+        // them; a note read from the replica resolves against the
+        // replica itself, with the same rules the server applies.
+        if (note.links.isNotEmpty()) {
+            return note.links.map { ResolvedLink(it.rawTarget, it.toId?.ifEmpty { null }, it.resolved) }
+        }
+        val raws = GoRender.wikiLinks(body)
+        if (raws.isEmpty()) return emptyList()
+        val resolver = WikiResolver(note.space, store.spaceNoteRefs(note.space))
+        return raws.map { resolver.resolve(it, note.path) }
+    }
+
     /**
      * Replays the queue oldest first. A network failure stops the pass
      * with the op kept for the next one; a server refusal drops the op,
@@ -202,6 +291,13 @@ class YanaNoteRepository(
                         )
                         res.ok
                     }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    !(e is HttpException && permanent(e.code()))
+                }
+                is OpPayload.Task -> try {
+                    client.api().tickTask(TaskTickRequest(op.op.noteId, op.op.line, op.op.done))
+                    true
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     !(e is HttpException && permanent(e.code()))
