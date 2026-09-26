@@ -49,6 +49,7 @@ import com.collinpendleton.yana.data.rt.SyncEngine
 import com.collinpendleton.yana.ui.ConnectionDot
 import com.collinpendleton.yana.ui.Loader
 import com.collinpendleton.yana.ui.Placeholder
+import com.collinpendleton.yana.ui.YanaIcons
 import com.collinpendleton.yana.ui.formatTime
 import com.collinpendleton.yana.ui.editor.MarkdownEditor
 import com.collinpendleton.yana.ui.htmlnote.HtmlNotePane
@@ -80,6 +81,7 @@ fun NoteScreen(
     onBack: () -> Unit,
     onOpenNote: (String) -> Unit = {},
     onTag: (String) -> Unit = {},
+    onHistory: (id: String, title: String) -> Unit = { _, _ -> },
 ) {
     val app = LocalContext.current.yana
     val vm: Loader<Note> = viewModel(key = "note:$id") { Loader(fetch = { repo.note(id) }) }
@@ -115,6 +117,9 @@ fun NoteScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
+                    IconButton(onClick = { onHistory(id, note?.title?.ifEmpty { null } ?: title) }) {
+                        Icon(YanaIcons.History, contentDescription = "History")
+                    }
                     if (canEdit && editing) {
                         IconButton(onClick = { editing = false }) {
                             Icon(Icons.Default.Check, contentDescription = "Done editing")

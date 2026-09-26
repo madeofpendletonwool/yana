@@ -95,6 +95,41 @@ interface NoteRepository {
      */
     suspend fun resolveLinks(note: Note, body: String): List<ResolvedLink>
 
+    /**
+     * The note's revisions. History lives on the server, so these four
+     * are online-only: a failure says why instead of answering from a
+     * cache that does not exist.
+     */
+    suspend fun noteHistory(id: String): List<HistoryEntry>
+
+    /** The note's diff between two revisions, as unified diff text. */
+    suspend fun noteHistoryDiff(id: String, from: String, to: String): String
+
+    /** Writes a revision's old text back as an edit; open editors converge on it. */
+    suspend fun restoreRevision(id: String, revision: String, path: String)
+
+    /** One space's feed page, the server's folding of its history. */
+    suspend fun activity(
+        space: String,
+        path: String? = null,
+        since: String? = null,
+        author: String? = null,
+        cursor: String? = null,
+        limit: Int = 50,
+    ): ActivityResponse
+
+    /** What restoring the tree, or one space, to a commit would do. */
+    suspend fun pitPreview(commit: String, space: String): PitPreview
+
+    /** Runs the restore; the server tags what stood before it first. */
+    suspend fun pitRestore(commit: String, space: String): RestoreSummary
+
+    /** Every deleted note the account may bring back. */
+    suspend fun deletedNotes(): List<DeletedNoteRow>
+
+    /** Brings one deleted note back: from the trash, or the history. */
+    suspend fun restoreDeleted(id: String): DeletedRestoreResult
+
     /** How many offline actions wait for the network. */
     val pendingCount: Flow<Int>
 }
@@ -151,6 +186,14 @@ data class SearchResult(
     val snippet: String,
     val fromServer: Boolean,
 )
+
+/**
+ * The history endpoints answer 501 when the server runs without the
+ * git layer; the message says it plainly instead of naming a status
+ * code.
+ */
+internal fun Throwable.asHistoryError(): Throwable =
+    if (this is HttpException && code() == 501) IllegalStateException("History is off on this server.") else this
 
 /** The repository over one server and its replica. */
 class YanaNoteRepository(
@@ -344,6 +387,76 @@ class YanaNoteRepository(
         return raws.map { resolver.resolve(it, note.path) }
     }
 
+    override suspend fun noteHistory(id: String): List<HistoryEntry> {
+        bind()
+        return try {
+            client.api().noteHistory(id).entries
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw e.asHistoryError()
+        }
+    }
+
+    override suspend fun noteHistoryDiff(id: String, from: String, to: String): String {
+        bind()
+        return try {
+            client.api().noteHistoryDiff(id, from, to).diff
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw e.asHistoryError()
+        }
+    }
+
+    override suspend fun restoreRevision(id: String, revision: String, path: String) {
+        bind()
+        client.api().restoreNote(id, RestoreNoteRequest(revision, path))
+    }
+
+    override suspend fun activity(
+        space: String,
+        path: String?,
+        since: String?,
+        author: String?,
+        cursor: String?,
+        limit: Int,
+    ): ActivityResponse {
+        bind()
+        return try {
+            client.api().activity(space = space, path = path, since = since, author = author, limit = limit, cursor = cursor)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw e.asHistoryError()
+        }
+    }
+
+    override suspend fun pitPreview(commit: String, space: String): PitPreview {
+        bind()
+        val res = client.api().pitPreview(PitRestoreRequest(commit, space))
+        return res.preview ?: PitPreview(commit = commit, space = space)
+    }
+
+    override suspend fun pitRestore(commit: String, space: String): RestoreSummary =
+        client.api().pitRestore(PitRestoreRequest(commit, space))
+
+    override suspend fun deletedNotes(): List<DeletedNoteRow> {
+        bind()
+        return try {
+            client.api().deletedNotes().entries
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw e.asHistoryError()
+        }
+    }
+
+    override suspend fun restoreDeleted(id: String): DeletedRestoreResult {
+        bind()
+        return client.api().restoreDeleted(id)
+    }
+
     /**
      * Replays the queue oldest first. A network failure stops the pass
      * with the op kept for the next one; a server refusal drops the op,
@@ -408,9 +521,7 @@ class YanaNoteRepository(
     }
 
     /** A refused request the server will keep refusing. */
-    private fun permanent(code: Int): Boolean = code >= 400 && code < 500 && code != 408 && code != 429
-
-    /** Ties the replica to the signed-in account, wiping it on a change. */
+    private fun permanent(code: Int): Boolean = code >= 400 && code < 500 && code != 408 && code != 429    /** Ties the replica to the signed-in account, wiping it on a change. */
     private suspend fun bind() {
         val s = client.session.value ?: return
         val server = normalizeServerUrl(s.server)?.toString() ?: s.server

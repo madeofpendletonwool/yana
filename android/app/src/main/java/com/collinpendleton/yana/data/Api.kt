@@ -90,4 +90,47 @@ interface YanaApi {
 
     @GET("api/auth/sessions")
     suspend fun sessions(): SessionsResponse
+
+    /** The note's revisions from the server's git history, renames followed. */
+    @GET("api/notes/{id}/history")
+    suspend fun noteHistory(@Path("id") id: String): HistoryResponse
+
+    /** The unified diff of the note's path between two of its revisions. */
+    @GET("api/notes/{id}/history/diff")
+    suspend fun noteHistoryDiff(
+        @Path("id") id: String,
+        @Query("from") from: String,
+        @Query("to") to: String,
+    ): HistoryDiffResponse
+
+    /** Writes a revision's old text back into the note as a live edit. */
+    @POST("api/notes/{id}/history/restore")
+    suspend fun restoreNote(@Path("id") id: String, @Body body: RestoreNoteRequest): OkResponse
+
+    /** One space's history folded into feed entries. */
+    @GET("api/spaces/{space}/activity")
+    suspend fun activity(
+        @Path("space") space: String,
+        @Query("path") path: String? = null,
+        @Query("since") since: String? = null,
+        @Query("author") author: String? = null,
+        @Query("limit") limit: Int = 50,
+        @Query("cursor") cursor: String? = null,
+    ): ActivityResponse
+
+    /** What restoring to a commit would do, exactly, before anything moves. */
+    @POST("api/git/restore/preview")
+    suspend fun pitPreview(@Body body: PitRestoreRequest): PitPreviewResponse
+
+    /** Moves the tree, or one space, back to a commit. */
+    @POST("api/git/restore")
+    suspend fun pitRestore(@Body body: PitRestoreRequest): RestoreSummary
+
+    /** Every deleted note with something to bring it back. */
+    @GET("api/deleted-notes")
+    suspend fun deletedNotes(): DeletedNotesResponse
+
+    /** Brings one deleted note back. */
+    @POST("api/deleted-notes/{id}/restore")
+    suspend fun restoreDeleted(@Path("id") id: String): DeletedRestoreResult
 }

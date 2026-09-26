@@ -47,6 +47,7 @@ import com.collinpendleton.yana.data.noteCount
 import com.collinpendleton.yana.data.visibleRows
 import com.collinpendleton.yana.ui.Loader
 import com.collinpendleton.yana.ui.Placeholder
+import com.collinpendleton.yana.ui.YanaIcons
 
 /** One space: its folder tree, folders opening in place, notes listed under them. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,6 +58,7 @@ fun SpaceScreen(
     label: String,
     onBack: () -> Unit,
     onNote: (id: String, title: String) -> Unit,
+    onActivity: () -> Unit = {},
 ) {
     // The replica answers if the network cannot; pull-to-refresh syncs.
     val vm: Loader<List<TreeNode>> = viewModel(key = "space:$space") {
@@ -74,6 +76,9 @@ fun SpaceScreen(
                 title = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                },
+                actions = {
+                    IconButton(onClick = onActivity) { Icon(YanaIcons.History, contentDescription = "What changed") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )

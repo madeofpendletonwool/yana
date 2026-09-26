@@ -12,7 +12,11 @@ their colors. HTML notes render in a sandboxed WebView and edit by
 source. A Tasks page gathers every open box across a space (or every
 space) grouped by the note it lives in, ticked in place, following
 changes live while it is open and shown from the cache with its age when
-the network is gone.
+the network is gone. History reads the same way it does on the web: a
+note's revisions with their diffs and restores, the activity feed of
+what changed by whom grouped by day, and a point-in-time restore
+previewed before it runs — online only, because the history lives on
+the server.
 
 ## Build
 
@@ -99,6 +103,49 @@ its socket (the same `watch`/`chg` frames the web's page uses) and the
 listing refetches, debounced, as changes land. The last fetched list is
 cached in Room per filter and shows with its age when the network is
 gone. The open count feeds the home screen's Tasks row.
+
+## History and activity
+
+The history layer is the git repository under the notes root, the same
+one the web reads: online only, because that is where it lives. A
+note's History (the clock in its title bar, a screen of its own until
+the details sheet lands) lists its revisions over
+`GET /api/notes/{id}/history` with who made each — a person, an agent,
+or the files — and when. A revision opens its diff
+(`GET /api/notes/{id}/history/diff`) as a wrapped, tinted list at phone
+width: additions green, removals in the error color, hunks headed;
+an older revision diffs against the newest so the diff says what
+changed since it stood, the newest against the one before it.
+Restore confirms, then writes the old text back as a live edit over
+`POST /api/notes/{id}/history/restore` — the open editor converges on
+the restored text and the history shows who restored it, the same
+revertible edit the web's panel makes.
+
+The activity feed ("What changed", from home or a space's title bar)
+reads `GET /api/spaces/{space}/activity` for one space or for every
+space the account belongs to, merged by time and grouped by day. An
+agent's run of commits is one entry with its span; the notes an entry
+touched open at a tap (a deleted note carries its path, untappable).
+Opening the feed marks it seen — kept on this device the way the web
+keeps it per browser — and the "Since I last looked" window plus the
+divider under what is new follow from that marker; the home screen's
+What changed row counts what landed since without marking anything.
+
+An entry's restore icon (only where the server would take one: the
+space's feed says for that scope, and the tree is the owner's move)
+opens a preview over `POST /api/git/restore/preview` that lists every
+note that comes back, changes, moves, or goes — the same list the
+web's preview shows for the same point — and the confirm runs
+`POST /api/git/restore`. What stands now is committed and tagged
+first, and what the restore removes goes to the trash, so it comes
+back the same way.
+
+Deleted notes (Settings → Data) list over `GET /api/deleted-notes`
+with what a restore recovers each from — the trash copy, the retained
+edits, or the history — and restoring one brings it back to where it
+lived, or a free name beside whatever took its path, opening the note
+when it lands. With history off (a build without the git layer) these
+screens say so instead of guessing.
 
 Put the SDK location in `android/local.properties`
 (`sdk.dir=/path/to/Android/sdk`) or set `ANDROID_HOME`. Android Studio
@@ -300,13 +347,18 @@ app/src/main/java/com/collinpendleton/yana/
   data/rt/                       the realtime layer: wire codec, socket, engine, workers
   data/search/                   the query grammar and offline search SQL (ports of the server's)
   data/NoteRepository.kt         the one door the screens go through
-  ui/Nav.kt                      routes: server → sign-in → spaces → space tree → note; search; settings
+  ui/Nav.kt                      routes: server → sign-in → spaces → space tree → note; search; tasks; activity; history; settings
+  ui/Icons.kt                    the glyphs the chrome shares with the web client (Lucide)
   ui/ConnectionDot.kt            the offline/syncing/live indicator
   ui/screens/                    one file per screen
+  ui/activity/                   the feed model, formatting, and the point-in-time restore dialog
+  ui/history/                    the unified-diff parser and renderer
+  ui/editor/                     the markdown editor over the CRDT
   ui/htmlnote/                   the sandboxed WebView, the source editor, view-token minting
+  ui/reader/                     the reading view's WebView and asset fetcher
   ui/theme/                      the Identity palette and type
-crdt/                            the CRDT engine slot (below)
-fonts/                           licenses for the bundled fonts
+  crdt/                          the CRDT engine slot (below)
+  fonts/                         licenses for the bundled fonts
 ```
 
 ## The CRDT engine

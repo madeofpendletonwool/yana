@@ -113,6 +113,19 @@ class Prefs(context: Context) {
         sp.edit { putString("theme", mode.name) }
         theme.value = mode
     }
+
+    /**
+     * When this device last looked at the activity feed, in epoch
+     * milliseconds; null when it never has. Kept per device, the way
+     * the web keeps it per browser, so "since I last looked" is this
+     * screen's own news.
+     */
+    fun activitySeen(): Long? = sp.getLong("activity.seen", 0L).takeIf { it > 0 }
+
+    /** Opening the feed is the marker: everything before now is old news next time. */
+    fun touchActivitySeen() {
+        sp.edit { putLong("activity.seen", System.currentTimeMillis()) }
+    }
 }
 
 val Context.yana: YanaApp get() = applicationContext as YanaApp

@@ -1,5 +1,6 @@
 package com.collinpendleton.yana.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -49,10 +51,10 @@ import com.collinpendleton.yana.ui.Wordmark
 import com.collinpendleton.yana.ui.theme.ThemeMode
 import kotlinx.coroutines.launch
 
-/** Account, appearance, and about. */
+/** Account, appearance, data, and about. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(app: YanaApp, onBack: () -> Unit) {
+fun SettingsScreen(app: YanaApp, onBack: () -> Unit, onDeletedNotes: () -> Unit = {}) {
     val client = app.client
     val session by client.session.collectAsStateWithLifecycle()
     val mode by app.prefs.themeMode.collectAsStateWithLifecycle()
@@ -104,6 +106,27 @@ fun SettingsScreen(app: YanaApp, onBack: () -> Unit) {
                             shape = SegmentedButtonDefaults.itemShape(i, modes.size),
                         ) { Text(m.name) }
                     }
+                }
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                Section("Data")
+                Row(
+                    Modifier.fillMaxWidth().clickable(onClick = onDeletedNotes).padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Deleted notes", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Notes whose files are gone, each restorable to where it lived.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)

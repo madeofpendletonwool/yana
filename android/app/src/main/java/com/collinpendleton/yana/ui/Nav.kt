@@ -12,6 +12,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.collinpendleton.yana.YanaApp
 import com.collinpendleton.yana.data.normalizeServerUrl
+import com.collinpendleton.yana.ui.screens.ActivityScreen
+import com.collinpendleton.yana.ui.screens.DeletedNotesScreen
+import com.collinpendleton.yana.ui.screens.NoteHistoryScreen
 import com.collinpendleton.yana.ui.screens.NoteScreen
 import com.collinpendleton.yana.ui.screens.SearchScreen
 import com.collinpendleton.yana.ui.screens.ServerScreen
@@ -30,6 +33,10 @@ import kotlinx.serialization.Serializable
 @Serializable data class NoteRoute(val id: String, val title: String, val line: Int = -1)
 @Serializable data class SearchRoute(val query: String = "")
 @Serializable data class TasksRoute(val space: String = "")
+@Serializable data class NoteHistoryRoute(val id: String, val title: String = "")
+/** [space] is "" for the feed across every space. */
+@Serializable data class ActivityRoute(val space: String = "")
+@Serializable data object DeletedNotesRoute
 @Serializable data object SettingsRoute
 
 @Composable
@@ -64,11 +71,12 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
         }
         composable<SpacesRoute> {
             SpacesScreen(
-                repo = app.repo,
+                app = app,
                 onSpace = { nav.navigate(SpaceRoute(it.name, it.displayName)) },
                 onSearch = { nav.navigate(SearchRoute()) },
                 onSettings = { nav.navigate(SettingsRoute) },
                 onTasks = { nav.navigate(TasksRoute()) },
+                onActivity = { nav.navigate(ActivityRoute()) },
             )
         }
         composable<SpaceRoute> { entry ->
@@ -79,6 +87,7 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
                 label = r.label,
                 onBack = { nav.popBackStack() },
                 onNote = { id, title -> nav.navigate(NoteRoute(id, title)) },
+                onActivity = { nav.navigate(ActivityRoute(r.name)) },
             )
         }
         composable<NoteRoute> { entry ->
@@ -93,6 +102,35 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
                 onOpenNote = { id -> nav.navigate(NoteRoute(id, "")) },
                 // Until the tag page lands (12k), a tag opens its search.
                 onTag = { tag -> nav.navigate(SearchRoute(query = "tag:$tag")) },
+                onHistory = { id, title -> nav.navigate(NoteHistoryRoute(id, title)) },
+            )
+        }
+        composable<NoteHistoryRoute> { entry ->
+            val r = entry.toRoute<NoteHistoryRoute>()
+            NoteHistoryScreen(
+                repo = app.repo,
+                id = r.id,
+                title = r.title,
+                onBack = { nav.popBackStack() },
+            )
+        }
+        composable<ActivityRoute> { entry ->
+            val r = entry.toRoute<ActivityRoute>()
+            val session by app.client.session.collectAsStateWithLifecycle()
+            ActivityScreen(
+                repo = app.repo,
+                prefs = app.prefs,
+                isOwner = session?.isOwner ?: false,
+                initialSpace = r.space,
+                onBack = { nav.popBackStack() },
+                onNote = { id, title -> nav.navigate(NoteRoute(id, title)) },
+            )
+        }
+        composable<DeletedNotesRoute> {
+            DeletedNotesScreen(
+                repo = app.repo,
+                onBack = { nav.popBackStack() },
+                onOpenNote = { id, title -> nav.navigate(NoteRoute(id, title)) },
             )
         }
         composable<SearchRoute> { entry ->
@@ -115,7 +153,7 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
             )
         }
         composable<SettingsRoute> {
-            SettingsScreen(app = app, onBack = { nav.popBackStack() })
+            SettingsScreen(app = app, onBack = { nav.popBackStack() }, onDeletedNotes = { nav.navigate(DeletedNotesRoute) })
         }
     }
 }
