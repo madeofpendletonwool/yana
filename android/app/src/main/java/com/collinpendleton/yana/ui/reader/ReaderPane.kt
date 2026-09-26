@@ -44,6 +44,8 @@ fun ReaderPane(
     onTag: (String) -> Unit,
     onToast: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** The body line a tasks row opened the note at; -1 opens at the top. */
+    atLine: Int = -1,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -87,6 +89,24 @@ fun ReaderPane(
     var pushedSeq by remember(note.id) { mutableStateOf(0) }
     var repush by remember(note.id) { mutableStateOf(0) }
 
+    // A tasks row's line: scroll its checkbox into view once the body
+    // that holds it is on the page, trying until the render lands (the
+    // first paints may still carry an empty body) and giving up after a
+    // spell when the line is not there (it moved under the list).
+    var pendingLine by remember(note.id) { mutableStateOf(atLine) }
+    var web by remember(note.id) { mutableStateOf<WebView?>(null) }
+    LaunchedEffect(note.id, pageLoaded, html, pendingLine) {
+        var tries = 0
+        while (pageLoaded && pendingLine >= 0 && tries < 20) {
+            delay(250)
+            tries++
+            val wv = web ?: return@LaunchedEffect
+            wv.evaluateJavascript(scrollToLineJs(pendingLine)) { found ->
+                if (found == "true") pendingLine = -1
+            }
+        }
+    }
+
     val onTap: (ReaderTap) -> Unit = { tap ->
         when (tap) {
             is ReaderTap.OpenNote -> onOpenNote(tap.id)
@@ -116,6 +136,7 @@ fun ReaderPane(
         modifier = modifier,
         factory = { ctx ->
             WebView(ctx).apply {
+                web = this
                 applyReaderSettings(this)
                 webViewClient = ReaderWebViewClient(
                     assets = assetLoader(ctx),
@@ -145,3 +166,13 @@ fun ReaderPane(
         onRelease = { it.destroy() },
     )
 }
+
+/**
+ * The script that scrolls one body line's checkbox into view — the same
+ * selector the web's own jump-to-line uses — and says whether the line
+ * was on the page yet.
+ */
+internal fun scrollToLineJs(line: Int): String =
+    "(function(){var b=document.querySelector('input[type=checkbox][data-line=\"$line\"]');" +
+        "if(!b)return false;var li=b.closest('li');if(li)li.classList.add('task-hit');" +
+        "b.scrollIntoView({block:'center'});return true})()"

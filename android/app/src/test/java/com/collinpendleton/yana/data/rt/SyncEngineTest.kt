@@ -318,6 +318,49 @@ class SyncEngineTest {
     }
 
     @Test
+    fun watchesSpacesWithoutANoteOpen() {
+        // Collect on another thread: the engine's scope is single-threaded
+        // and the event flow has no replay, so a collector queued behind
+        // engine work would miss the frame.
+        val seen = CopyOnWriteArrayList<RtEvent>()
+        val collector = CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            engine.events.collect { seen.add(it) }
+        }
+        try {
+            // No note is open; the watch alone brings the connection up.
+            engine.watchSpaces(setOf("work"))
+            waitUntil { liveRelays.any { r -> r.frames.any { it.t == Rt.WATCH } } }
+            val watch = liveRelays.flatMap { it.frames }.first { it.t == Rt.WATCH }
+            assertEquals("work", watch.s)
+            waitUntil { engine.status.value == RtStatus.Live }
+
+            // A change signal in the watched space arrives as an event,
+            // the listing screens' refetch trigger.
+            liveRelays.last().push(ServerFrame(t = Rt.CHANGED, n = note, path = "work/todo.md"))
+            waitUntil { seen.any { it is RtEvent.Changed && it.noteId == note && it.path == "work/todo.md" } }
+
+            // The last watcher leaving with no note open puts the socket away.
+            engine.watchSpaces(emptySet())
+            waitUntil { engine.status.value == RtStatus.Offline }
+        } finally {
+            collector.cancel()
+        }
+    }
+
+    @Test
+    fun rewatchesAfterAReconnect() {
+        engine.watchSpaces(setOf("work"))
+        waitUntil { liveRelays.any { r -> r.frames.any { it.t == Rt.WATCH } } }
+        // The connection dies; the watch outlives it and is asked for
+        // again on the next one.
+        liveRelays.last().ws?.close(1001, "gone")
+        waitUntil { connections.get() >= 2 }
+        waitUntil { liveRelays.drop(1).any { r -> r.frames.any { it.t == Rt.WATCH } } }
+        engine.watchSpaces(emptySet())
+        waitUntil { engine.status.value == RtStatus.Offline }
+    }
+
+    @Test
     fun stalePeersAreSwept() {
         var clock = 1_000_000L
         val e2 = SyncEngine(
@@ -374,6 +417,11 @@ class SyncEngineTest {
 
         override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
             ws = webSocket
+        }
+
+        /** Answers the close handshake, the way a real server does. */
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            webSocket.close(code, reason)
         }
 
         /** Pushes a frame to the client, as the server would. */

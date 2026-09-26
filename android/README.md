@@ -9,7 +9,10 @@ tags, and task boxes that tick — and edit live through the shared
 document: a plain text field whose changes become document operations,
 with undo scoped to this device and other people's cursors drawn in
 their colors. HTML notes render in a sandboxed WebView and edit by
-source.
+source. A Tasks page gathers every open box across a space (or every
+space) grouped by the note it lives in, ticked in place, following
+changes live while it is open and shown from the cache with its age when
+the network is gone.
 
 ## Build
 
@@ -71,6 +74,31 @@ and a disk cache, so the token never enters the page.
 When Phase 29 (aliases and embeds) lands, `![[note]]` embeds render
 through the same path; the render side of the engine is shared, so
 nothing new is needed here beyond picking the bundle up.
+
+## The tasks page
+
+Every open `- [ ]` across a space — or across every space the account
+belongs to — grouped by the note it lives in, over `GET /api/tasks`.
+Filters pick a space, a folder, a tag, and a toggle for tasks completed
+in the last 30 days. A row opens its note scrolled to the task's line;
+the line's markdown shows styled (bold, italics, code, strikethrough)
+the way the note renders it.
+
+Ticking calls `PATCH /api/tasks` with the note id and the body line,
+exactly the write the web's tasks page and the in-note checkbox use, so
+everyone's list agrees. A tick the server cannot take (the line moved
+under it, a viewer's space) reverts with the server's reason; a 409
+refetches the listing, which is how the server says the list catches up
+on its own. Offline, the tick queues in `pending_ops`, flips the cached
+note and the cached listing so it reads back ticked, and replays on
+reconnect — the replay of an already-applied tick writes nothing, so
+there is no duplicate edit.
+
+While the screen is open the sync engine watches the listed spaces over
+its socket (the same `watch`/`chg` frames the web's page uses) and the
+listing refetches, debounced, as changes land. The last fetched list is
+cached in Room per filter and shows with its age when the network is
+gone. The open count feeds the home screen's Tasks row.
 
 Put the SDK location in `android/local.properties`
 (`sdk.dir=/path/to/Android/sdk`) or set `ANDROID_HOME`. Android Studio

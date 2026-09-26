@@ -61,6 +61,26 @@ interface YanaApi {
     @PATCH("api/tasks")
     suspend fun tickTask(@Body body: TaskTickRequest)
 
+    /**
+     * Every task the filters name: open boxes by default, completed
+     * ones for the last 30 days with done=true.
+     */
+    @GET("api/tasks")
+    suspend fun tasks(
+        @Query("space") space: String? = null,
+        @Query("done") done: Boolean? = null,
+        @Query("tag") tag: String? = null,
+        @Query("path") path: String? = null,
+    ): TasksResponse
+
+    /** The open count across every space the account belongs to. */
+    @GET("api/tasks")
+    suspend fun taskCount(@Query("count") count: Int = 1): TaskCountResponse
+
+    /** The account's tags with their note counts. */
+    @GET("api/tags")
+    suspend fun tags(): TagsResponse
+
     @POST("api/notes/{id}/move")
     suspend fun moveNote(@Path("id") id: String, @Body body: MoveRequest): retrofit2.Response<Unit>
 

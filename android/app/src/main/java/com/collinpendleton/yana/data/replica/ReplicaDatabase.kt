@@ -41,6 +41,12 @@ data class NoteWithTags(
     val tags: String?,
 )
 
+/** One tag and how many cached notes carry it. */
+data class TagCountRow(
+    val tag: String,
+    val count: Int,
+)
+
 @Dao
 interface ReplicaDao {
     @Query("SELECT * FROM spaces ORDER BY name")
@@ -126,6 +132,50 @@ interface ReplicaDao {
 
     @Query("SELECT DISTINCT note_id FROM crdt_outbox")
     suspend fun outboxNotes(): List<String>
+
+    // --- the tasks cache ------------------------------------------------------
+
+    /** The cached listing of one filter scope, in the server's row order. */
+    @Query("SELECT * FROM tasks_cache WHERE scope = :scope ORDER BY ord")
+    suspend fun tasksOf(scope: String): List<TaskCacheEntity>
+
+    /** When the scope was last fetched, or null when it never was. */
+    @Query("SELECT fetched_at FROM task_fetches WHERE scope = :scope")
+    suspend fun taskFetchTime(scope: String): Long?
+
+    /** Swaps one scope's cached listing and stamps its fetch time. */
+    @Transaction
+    suspend fun replaceTasks(scope: String, rows: List<TaskCacheEntity>, fetchedAt: Long) {
+        clearTasksOf(scope)
+        for (r in rows) insertTask(r)
+        insertTaskFetch(TaskFetchEntity(scope, fetchedAt))
+    }
+
+    @Query("DELETE FROM tasks_cache WHERE scope = :scope")
+    suspend fun clearTasksOf(scope: String)
+
+    @Insert
+    suspend fun insertTask(row: TaskCacheEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTaskFetch(entry: TaskFetchEntity)
+
+    /**
+     * Flips one box in every cached listing it appears in, so an
+     * offline tick reads back ticked wherever the row shows.
+     */
+    @Query("UPDATE tasks_cache SET done = :done WHERE note_id = :noteId AND line = :line")
+    suspend fun flipTaskRow(noteId: String, line: Int, done: Boolean)
+
+    @Query("DELETE FROM tasks_cache")
+    suspend fun clearTasks()
+
+    @Query("DELETE FROM task_fetches")
+    suspend fun clearTaskFetches()
+
+    /** The replica's tag counts, the tag filter's offline answer. */
+    @Query("SELECT tag, COUNT(*) as count FROM tags GROUP BY tag ORDER BY tag")
+    suspend fun tagCounts(): List<TagCountRow>
 
     /**
      * One whole sync: notes and tags replaced, spaces replaced, bodies
@@ -231,6 +281,8 @@ interface ReplicaDao {
         clearMeta()
         clearCrdtState()
         clearOutbox()
+        clearTasks()
+        clearTaskFetches()
     }
 
     @Query("DELETE FROM tags")
@@ -277,8 +329,10 @@ interface ReplicaDao {
         ReplicaMetaEntity::class,
         NoteCrdtEntity::class,
         CrdtOutboxEntity::class,
+        TaskCacheEntity::class,
+        TaskFetchEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class ReplicaDatabase : RoomDatabase() {
@@ -297,6 +351,22 @@ abstract class ReplicaDatabase : RoomDatabase() {
                 sql("CREATE TABLE IF NOT EXISTS `note_crdt` (`note_id` TEXT NOT NULL PRIMARY KEY, `state` BLOB NOT NULL, `opened_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL)")
                 sql("CREATE TABLE IF NOT EXISTS `crdt_outbox` (`seq` INTEGER PRIMARY KEY AUTOINCREMENT, `note_id` TEXT NOT NULL, `payload` BLOB NOT NULL, `created_at` INTEGER NOT NULL)")
                 sql("CREATE INDEX IF NOT EXISTS `index_crdt_outbox_note_id` ON `crdt_outbox` (`note_id`)")
+            }
+        }
+
+        /**
+         * Version 3 adds the tasks cache: the last fetched listing per
+         * filter scope, with its fetch time. The DDL matches what Room
+         * generates from the entities above.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.SQLiteConnection) {
+                fun sql(stmt: String) = db.prepare(stmt).use { it.step() }
+                sql(
+                    "CREATE TABLE IF NOT EXISTS `tasks_cache` (`scope` TEXT NOT NULL, `note_id` TEXT NOT NULL, `line` INTEGER NOT NULL, `indent` INTEGER NOT NULL, `text` TEXT NOT NULL, `done` INTEGER NOT NULL, `done_at` TEXT, `heading` TEXT NOT NULL, `ord` INTEGER NOT NULL, `space` TEXT NOT NULL, `path` TEXT NOT NULL, `title` TEXT NOT NULL, `kind` TEXT NOT NULL, PRIMARY KEY(`scope`, `note_id`, `line`))",
+                )
+                sql("CREATE INDEX IF NOT EXISTS `index_tasks_cache_scope` ON `tasks_cache` (`scope`)")
+                sql("CREATE TABLE IF NOT EXISTS `task_fetches` (`scope` TEXT NOT NULL PRIMARY KEY, `fetched_at` INTEGER NOT NULL)")
             }
         }
 

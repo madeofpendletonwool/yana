@@ -31,6 +31,13 @@ sealed class RtEvent {
 
     data class Error(val noteId: String?, val code: String, val reason: String) : RtEvent()
 
+    /**
+     * A note in a watched space changed (an edit, a move, a delete).
+     * Carries no payload; a listing page refetches what it needs,
+     * debounced — the tasks screen's live half.
+     */
+    data class Changed(val noteId: String, val path: String?) : RtEvent()
+
     /** A peer's awareness payload (cursor, presence), passed through unopened. */
     class Awareness(val noteId: String, val author: String?, val payload: ByteArray) : RtEvent()
 }
@@ -138,6 +145,9 @@ class SyncEngine(
     private var flushJob: Job? = null
     private var keepaliveJob: Job? = null
 
+    /** The watched spaces, driving the connection alongside note sessions. */
+    private val watches = LinkedHashSet<String>()
+
     /**
      * Opens (or joins) a note's live document. The handle's flows start
      * cold and fill in as the local state loads and the first
@@ -165,6 +175,36 @@ class SyncEngine(
         val s = sync { sessions[noteId] } ?: return
         s.subscribers--
         reap(noteId)
+    }
+
+    /**
+     * Watches whole spaces for changes, the tasks screen's live half:
+     * one `watch` frame per space on the engine's connection, and `chg`
+     * frames back as [RtEvent.Changed] whenever a note in one of them
+     * changes. The last watcher leaving with no note open puts the
+     * connection away. Replaces the watched set, so the screens call it
+     * with the spaces their filters name; an empty set stops watching.
+     * The server caps a connection at 32 watched spaces, so beyond that
+     * the first spaces (sorted) are watched and the rest wait for a
+     * refresh.
+     */
+    fun watchSpaces(spaces: Set<String>) {
+        val clean = spaces.filterTo(LinkedHashSet()) { it.isNotEmpty() }
+        val (added, idle) = sync {
+            val fresh = clean - watches
+            watches.clear()
+            watches.addAll(clean)
+            fresh to !wanted()
+        }
+        scope.launch {
+            if (added.isNotEmpty()) {
+                for (s in added.sorted().take(MAX_WATCHED_SPACES)) send(ClientFrame(Rt.WATCH, s = s))
+            }
+            when {
+                watches.isNotEmpty() -> ensureSession()
+                idle -> conn?.close(1000, "idle")
+            }
+        }
     }
 
     /** The editor's edit path: mutate the body, queue the update, batch the send. */
@@ -306,6 +346,7 @@ class SyncEngine(
         val all = sync {
             val list = sessions.values.toList()
             sessions.clear()
+            watches.clear()
             list
         }
         // The socket drops now, not on the engine's thread, so a
@@ -594,7 +635,7 @@ class SyncEngine(
 
     // --- the connection ------------------------------------------------------
 
-    private fun wanted(): Boolean = sync { sessions.values.any { it.current() } }
+    private fun wanted(): Boolean = sync { sessions.values.any { it.current() } || watches.isNotEmpty() }
 
     private fun ensureSession() {
         sync {
@@ -704,6 +745,11 @@ class SyncEngine(
         for (s in sync { sessions.values.filter { it.current() } }) {
             maybeSubscribe(s)
         }
+        // A fresh connection watches nothing: the spaces the screens
+        // asked for are asked for again, the way sessions resubscribe.
+        for (space in sync { watches.toList() }.sorted().take(MAX_WATCHED_SPACES)) {
+            send(ClientFrame(Rt.WATCH, s = space))
+        }
         keepaliveJob = scope.launch {
             while (connected) {
                 delay(timings.keepaliveMs)
@@ -775,9 +821,11 @@ class SyncEngine(
             Rt.MOVED -> _events.tryEmit(RtEvent.Moved(frame.n ?: "", frame.path))
             Rt.DELETED -> _events.tryEmit(RtEvent.Deleted(frame.n ?: ""))
             Rt.ERR -> _events.tryEmit(RtEvent.Error(frame.n, frame.c ?: "error", frame.r ?: ""))
-            // chg and watchd belong to the watch flow, which the listing
-            // screens do not use yet; the periodic replica sync covers them.
-            Rt.CHANGED, Rt.WATCHED -> {}
+            // A watched space's change signal: the listing screens
+            // refetch what they need, debounced. The own tick arrives
+            // here too, which is what confirms the row's new state.
+            Rt.CHANGED -> _events.tryEmit(RtEvent.Changed(frame.n ?: "", frame.path))
+            Rt.WATCHED -> {}
         }
     }
 
@@ -876,3 +924,6 @@ class SyncEngine(
 /** The reconnect delay: 500ms doubling to 8s, plus jitter, matching the web client. */
 fun backoffDelay(attempts: Int, random: Random, minMs: Long = 500, maxMs: Long = 8_000, jitterMs: Long = 250): Long =
     minOf(minMs shl attempts.coerceAtMost(10), maxMs) + (random.nextDouble() * jitterMs).toLong()
+
+/** The relay's cap on watched spaces per connection (Hub.MaxSpacesPerConn). */
+internal const val MAX_WATCHED_SPACES = 32
