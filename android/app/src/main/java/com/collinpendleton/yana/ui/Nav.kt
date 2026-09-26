@@ -12,18 +12,23 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.collinpendleton.yana.YanaApp
 import com.collinpendleton.yana.data.normalizeServerUrl
+import com.collinpendleton.yana.ui.screens.AccountScreen
 import com.collinpendleton.yana.ui.screens.ActivityScreen
 import com.collinpendleton.yana.ui.screens.ConflictScreen
 import com.collinpendleton.yana.ui.screens.ConflictsScreen
+import com.collinpendleton.yana.ui.screens.DataScreen
 import com.collinpendleton.yana.ui.screens.DeletedNotesScreen
 import com.collinpendleton.yana.ui.screens.NoteHistoryScreen
 import com.collinpendleton.yana.ui.screens.NoteScreen
+import com.collinpendleton.yana.ui.screens.PeopleScreen
 import com.collinpendleton.yana.ui.screens.SearchScreen
 import com.collinpendleton.yana.ui.screens.ServerScreen
 import com.collinpendleton.yana.ui.screens.SettingsScreen
 import com.collinpendleton.yana.ui.screens.SignInScreen
 import com.collinpendleton.yana.ui.screens.SpaceScreen
+import com.collinpendleton.yana.ui.screens.SpaceSettingsScreen
 import com.collinpendleton.yana.ui.screens.SpacesScreen
+import com.collinpendleton.yana.ui.screens.SpacesSettingsScreen
 import com.collinpendleton.yana.ui.screens.TasksScreen
 import kotlinx.serialization.Serializable
 
@@ -44,6 +49,16 @@ import kotlinx.serialization.Serializable
 /** One note's conflict copies and their resolutions; [id] is the surviving note. */
 @Serializable data class ConflictRoute(val id: String, val title: String = "")
 @Serializable data object SettingsRoute
+/** The account as a phone handles it: password, devices, revoke. */
+@Serializable data object AccountRoute
+/** Every space with the role this account holds in it; 12r. */
+@Serializable data object SpacesSettingsRoute
+/** One space's sharing: label and members for its owner. */
+@Serializable data class SpaceSettingsRoute(val space: String, val label: String)
+/** The server's accounts, the owner's view; 12r. */
+@Serializable data object PeopleRoute
+/** Deleted notes, conflicts, and a space as a zip; 12r. */
+@Serializable data object DataRoute
 
 @Composable
 fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) {
@@ -178,6 +193,45 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
         }
         composable<SettingsRoute> {
             SettingsScreen(
+                app = app,
+                onBack = { nav.popBackStack() },
+                onAccount = { nav.navigate(AccountRoute) },
+                onSpacesSettings = { nav.navigate(SpacesSettingsRoute) },
+                onPeople = { nav.navigate(PeopleRoute) },
+                onData = { nav.navigate(DataRoute) },
+                onOpenNote = { id, title -> nav.navigate(NoteRoute(id, title)) },
+            )
+        }
+        composable<AccountRoute> {
+            AccountScreen(
+                app = app,
+                onBack = { nav.popBackStack() },
+            )
+        }
+        composable<SpacesSettingsRoute> {
+            SpacesSettingsScreen(
+                app = app,
+                onBack = { nav.popBackStack() },
+                onSpace = { name, label -> nav.navigate(SpaceSettingsRoute(name, label)) },
+            )
+        }
+        composable<SpaceSettingsRoute> { entry ->
+            val r = entry.toRoute<SpaceSettingsRoute>()
+            SpaceSettingsScreen(
+                app = app,
+                space = r.space,
+                label = r.label,
+                onBack = { nav.popBackStack() },
+            )
+        }
+        composable<PeopleRoute> {
+            PeopleScreen(
+                app = app,
+                onBack = { nav.popBackStack() },
+            )
+        }
+        composable<DataRoute> {
+            DataScreen(
                 app = app,
                 onBack = { nav.popBackStack() },
                 onDeletedNotes = { nav.navigate(DeletedNotesRoute) },

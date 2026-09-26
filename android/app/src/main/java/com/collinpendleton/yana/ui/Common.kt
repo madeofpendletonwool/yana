@@ -1,5 +1,9 @@
 package com.collinpendleton.yana.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -68,3 +72,11 @@ private val dateFormat = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIU
 /** A server timestamp in the device's zone and locale, or "" when unreadable. */
 fun formatTime(s: String): String =
     parseInstant(s)?.let { dateFormat.format(it.atZone(ZoneId.systemDefault())) } ?: ""
+
+/** Opens the system browser at [url]; a device with nothing to open it hears so instead of crashing. */
+fun openUrl(context: Context, url: String) {
+    val opened = runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }.isSuccess
+    if (!opened) Toast.makeText(context, "No app on this device opens a web page.", Toast.LENGTH_SHORT).show()
+}

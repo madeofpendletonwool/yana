@@ -1,6 +1,7 @@
 package com.collinpendleton.yana.data
 
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
@@ -90,6 +91,42 @@ interface YanaApi {
 
     @GET("api/auth/sessions")
     suspend fun sessions(): SessionsResponse
+
+    /** Ends one session; the device it belongs to signs out on its next request. */
+    @DELETE("api/auth/sessions/{id}")
+    suspend fun revokeSession(@Path("id") id: String): OkResponse
+
+    /** The accounts on this server; the owner only. */
+    @GET("api/users")
+    suspend fun users(): UsersResponse
+
+    /** Adds an account with a starting password; the owner only. */
+    @POST("api/users")
+    suspend fun createUser(@Body body: CreateUserRequest): UserInfo
+
+    /** Removes an account; the owner only, never the owner's own. */
+    @DELETE("api/users/{id}")
+    suspend fun deleteUser(@Path("id") id: String): OkResponse
+
+    /** Sets a password: your own, or another person's as the owner. */
+    @POST("api/users/{id}/password")
+    suspend fun setPassword(@Path("id") id: String, @Body body: PasswordRequest): OkResponse
+
+    /** One space as the caller sees it: the role, and the members for a space owner. */
+    @GET("api/spaces/{space}")
+    suspend fun spaceDetail(@Path("space") space: String): SpaceDetail
+
+    /** Replaces a space's label and member list; a space owner's write. */
+    @PATCH("api/spaces/{space}")
+    suspend fun updateSpace(@Path("space") space: String, @Body body: UpdateSpaceRequest): OkResponse
+
+    /** Makes a space; any signed-in account may, and becomes its owner. */
+    @POST("api/spaces")
+    suspend fun createSpace(@Body body: CreateSpaceRequest): CreateSpaceResponse
+
+    /** Makes sure the Start here note exists and answers with it. */
+    @POST("api/guide")
+    suspend fun guide(@Body body: GuideRequest): GuideResponse
 
     /** The note's revisions from the server's git history, renames followed. */
     @GET("api/notes/{id}/history")

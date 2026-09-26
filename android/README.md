@@ -167,11 +167,33 @@ resolving it. The tree keeps copies out of its rows entirely (they
 nest under their survivor server-side), and search treats them as the
 real notes they are, the same as the web.
 
+## Settings
+
+Settings covers what a phone does well and hands the rest to the web
+by link. Account holds the password — changing it signs every other
+device out; this one stays — and every device signed in with its
+label, each revocable (`GET /api/auth/sessions`,
+`DELETE /api/auth/sessions/{id}`): the device a revoke ends signs out
+on its next request, this one included. Spaces and sharing lists each
+space with the role this account holds in it, makes new ones, and for
+a space's owner renames the label and adds, changes, or removes
+members (`PATCH /api/spaces/{space}` writes the label and the whole
+member list at once, the one write the server takes), picking from the
+server's accounts by name when the server's owner does it. People (the
+server's owner only) lists the accounts, adds one with a starting
+password, resets one, or removes it (`/api/users`). Data holds the
+deleted-notes and conflicts lists and exports a space as a zip
+(`GET /api/spaces/{space}/export/notes.zip`, downloaded with the
+session's auth) through the share sheet; the trash arrives with its
+own screen (Phase 12o). Help opens the Start here note, asking the
+server to make it (`POST /api/guide`) when it is not there yet. Agents
+and backups (the owner's), site export, and space conventions stay on
+the web: their rows open the signed-in server at its `/settings/`
+section.
+
 Put the SDK location in `android/local.properties`
 (`sdk.dir=/path/to/Android/sdk`) or set `ANDROID_HOME`. Android Studio
-writes the file itself.
-
-| Piece | Version | Why |
+writes the file itself.| Piece | Version | Why |
 |---|---|---|
 | JDK | 17 | What AGP 9 needs; the same JDK the CRDT AAR builds with |
 | Gradle | 9.8.0 (wrapper, checksum pinned) | |
