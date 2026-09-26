@@ -53,6 +53,25 @@ object DiffParser {
         }
         return out
     }
+
+    /**
+     * Parses the headerless unified diff the conflict endpoint returns:
+     * a `---`/`+++` pair naming the two sides, then every body line
+     * with no hunks between them.
+     */
+    fun parseHeaderless(diff: String): List<DiffLine> {
+        val out = ArrayList<DiffLine>()
+        for (raw in diff.lineSequence()) {
+            when {
+                raw.startsWith("---") || raw.startsWith("+++") -> Unit
+                raw.startsWith("+") -> out += DiffLine.Body('+', raw.substring(1))
+                raw.startsWith("-") -> out += DiffLine.Body('-', raw.substring(1))
+                raw.startsWith("\\") -> out += DiffLine.Body('\\', raw.substring(1))
+                else -> out += DiffLine.Body(' ', raw.substring(1))
+            }
+        }
+        return out
+    }
 }
 
 /** The diff's own colours, keyed off the theme the way the Identity palette is: muted green for what arrives, the error pair for what goes. */
@@ -80,7 +99,12 @@ fun diffColors(): DiffColors = if (MaterialTheme.colorScheme.background.luminanc
  */
 @Composable
 fun DiffView(diff: String, modifier: Modifier = Modifier) {
-    val lines = remember(diff) { DiffParser.parse(diff) }
+    DiffLines(remember(diff) { DiffParser.parse(diff) }, modifier)
+}
+
+/** The same list over lines parsed another way — a conflict diff has no hunks. */
+@Composable
+fun DiffLines(lines: List<DiffLine>, modifier: Modifier = Modifier) {
     val colors = diffColors()
     LazyColumn(modifier) {
         items(lines) { line ->
@@ -111,10 +135,13 @@ fun DiffView(diff: String, modifier: Modifier = Modifier) {
 }
 
 /** The one-line summary under a diff's title: how many lines each way. */
-fun diffCounts(diff: String): Pair<Int, Int> {
+fun diffCounts(diff: String): Pair<Int, Int> = lineCounts(DiffParser.parse(diff))
+
+/** The same counts over parsed lines, whichever parser made them. */
+fun lineCounts(lines: List<DiffLine>): Pair<Int, Int> {
     var add = 0
     var del = 0
-    for (l in DiffParser.parse(diff)) {
+    for (l in lines) {
         when ((l as? DiffLine.Body)?.kind) {
             '+' -> add++
             '-' -> del++
@@ -127,6 +154,11 @@ fun diffCounts(diff: String): Pair<Int, Int> {
 @Composable
 fun DiffCounts(diff: String, modifier: Modifier = Modifier) {
     val (add, del) = remember(diff) { diffCounts(diff) }
+    DiffCountRow(add, del, modifier)
+}
+
+@Composable
+private fun DiffCountRow(add: Int, del: Int, modifier: Modifier = Modifier) {
     val colors = diffColors()
     Text(
         buildAnnotatedString {
@@ -137,4 +169,11 @@ fun DiffCounts(diff: String, modifier: Modifier = Modifier) {
         style = MaterialTheme.typography.labelMedium.copy(fontFamily = Mono, fontWeight = FontWeight.SemiBold),
         modifier = modifier,
     )
+}
+
+/** The counts row for lines parsed another way, a conflict diff's among them. */
+@Composable
+fun DiffCounts(lines: List<DiffLine>, modifier: Modifier = Modifier) {
+    val (add, del) = remember(lines) { lineCounts(lines) }
+    DiffCountRow(add, del, modifier)
 }

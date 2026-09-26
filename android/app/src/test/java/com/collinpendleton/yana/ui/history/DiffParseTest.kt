@@ -62,4 +62,36 @@ class DiffParseTest {
         val lines = DiffParser.parse("diff --git a/x b/x\nindex abc..def\ntext without a hunk")
         assertTrue(lines.isEmpty())
     }
+
+    @Test fun conflictDiffHasNoHunksToWaitFor() {
+        // The shape internal/server/conflicts_test.go asserts: the two
+        // heads, then the body with no @@ between them.
+        val diff = """
+            --- main/a.md
+            +++ main/a.conflict-20260923T121212.md
+            -the current text
+            +the older text
+        """.trimIndent()
+
+        val lines = DiffParser.parseHeaderless(diff)
+        assertEquals(
+            listOf(
+                DiffLine.Body('-', "the current text"),
+                DiffLine.Body('+', "the older text"),
+            ),
+            lines,
+        )
+        assertEquals(1 to 1, lineCounts(lines))
+    }
+
+    @Test fun headerlessContextLinesKeepTheirPlace() {
+        val lines = DiffParser.parseHeaderless("--- a\n+++ b\n same\n-gone")
+        assertEquals(
+            listOf(
+                DiffLine.Body(' ', "same"),
+                DiffLine.Body('-', "gone"),
+            ),
+            lines,
+        )
+    }
 }

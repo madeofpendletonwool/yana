@@ -130,6 +130,24 @@ interface NoteRepository {
     /** Brings one deleted note back: from the trash, or the history. */
     suspend fun restoreDeleted(id: String): DeletedRestoreResult
 
+    /**
+     * Every conflict copy in the caller's spaces, with the note it
+     * belongs to while that survives. Resolving is a server action,
+     * so these four are online-only; the server's own messages
+     * (a copy whose survivor is gone, a server without the
+     * reconciliation loop) surface as they are.
+     */
+    suspend fun conflicts(): List<ConflictEntry>
+
+    /** The conflict copies parked beside one note. */
+    suspend fun noteConflicts(id: String): List<NoteMeta>
+
+    /** The diff between one copy and its survivor, as unified text. */
+    suspend fun conflictDiff(id: String): ConflictDiffResponse
+
+    /** Settles one copy — keep mine, keep theirs, or keep both — as one commit. */
+    suspend fun resolveConflict(id: String, action: ConflictAction): ConflictResolveResponse
+
     /** How many offline actions wait for the network. */
     val pendingCount: Flow<Int>
 }
@@ -455,6 +473,26 @@ class YanaNoteRepository(
     override suspend fun restoreDeleted(id: String): DeletedRestoreResult {
         bind()
         return client.api().restoreDeleted(id)
+    }
+
+    override suspend fun conflicts(): List<ConflictEntry> {
+        bind()
+        return client.api().conflicts().conflicts
+    }
+
+    override suspend fun noteConflicts(id: String): List<NoteMeta> {
+        bind()
+        return client.api().noteConflicts(id).conflicts
+    }
+
+    override suspend fun conflictDiff(id: String): ConflictDiffResponse {
+        bind()
+        return client.api().conflictDiff(id)
+    }
+
+    override suspend fun resolveConflict(id: String, action: ConflictAction): ConflictResolveResponse {
+        bind()
+        return client.api().resolveConflict(id, ConflictResolveRequest(action.value))
     }
 
     /**

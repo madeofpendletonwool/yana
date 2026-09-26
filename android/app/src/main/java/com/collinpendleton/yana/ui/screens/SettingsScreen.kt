@@ -54,12 +54,21 @@ import kotlinx.coroutines.launch
 /** Account, appearance, data, and about. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(app: YanaApp, onBack: () -> Unit, onDeletedNotes: () -> Unit = {}) {
+fun SettingsScreen(
+    app: YanaApp,
+    onBack: () -> Unit,
+    onDeletedNotes: () -> Unit = {},
+    onConflicts: () -> Unit = {},
+) {
     val client = app.client
     val session by client.session.collectAsStateWithLifecycle()
     val mode by app.prefs.themeMode.collectAsStateWithLifecycle()
     val sessions: Loader<List<SessionInfo>> = viewModel { Loader(fetch = { client.api().sessions().sessions }) }
     val device by sessions.loaded.collectAsStateWithLifecycle()
+    // The Data page's conflict count: a hint for the row, not a fact
+    // the screen depends on — a failure reads as unknown.
+    val conflicts: Loader<Int> = viewModel(key = "conflict-count") { Loader(fetch = { app.repo.conflicts().size }) }
+    val conflictCount by conflicts.loaded.collectAsStateWithLifecycle()
     var confirming by remember { mutableStateOf(false) }
     var signingOut by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -120,6 +129,32 @@ fun SettingsScreen(app: YanaApp, onBack: () -> Unit, onDeletedNotes: () -> Unit 
                             "Notes whose files are gone, each restorable to where it lived.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Row(
+                    Modifier.fillMaxWidth().clickable(onClick = onConflicts).padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Conflicts", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            when (val n = conflictCount.data) {
+                                null -> "Copies parked beside a note when two writes met the same path."
+                                1 -> "1 conflict copy waits — two writes met the same path."
+                                else -> "$n conflict copies wait — two writes met the same path."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (conflictCount.data != null && conflictCount.data!! > 0) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                         )
                     }
                     Icon(

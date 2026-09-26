@@ -133,4 +133,23 @@ interface YanaApi {
     /** Brings one deleted note back. */
     @POST("api/deleted-notes/{id}/restore")
     suspend fun restoreDeleted(@Path("id") id: String): DeletedRestoreResult
+
+    /** Every conflict copy in the caller's spaces, with its survivor while that lives. */
+    @GET("api/conflicts")
+    suspend fun conflicts(): ConflictsResponse
+
+    /** The conflict copies parked beside one note, for the banner on it. */
+    @GET("api/notes/{id}/conflicts")
+    suspend fun noteConflicts(@Path("id") id: String): NoteConflictsResponse
+
+    /** The diff between one conflict copy and the note it belongs to. */
+    @GET("api/conflicts/{id}/diff")
+    suspend fun conflictDiff(@Path("id") id: String): ConflictDiffResponse
+
+    /** Settles one conflict copy: keep mine, keep theirs, or keep both. */
+    @POST("api/conflicts/{id}/resolve")
+    suspend fun resolveConflict(
+        @Path("id") id: String,
+        @Body body: ConflictResolveRequest,
+    ): ConflictResolveResponse
 }
