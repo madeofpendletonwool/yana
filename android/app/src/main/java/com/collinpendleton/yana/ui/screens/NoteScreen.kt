@@ -1,13 +1,16 @@
 package com.collinpendleton.yana.ui.screens
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -40,6 +43,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.collinpendleton.yana.data.Note
@@ -82,11 +88,27 @@ fun NoteScreen(
     onOpenNote: (String) -> Unit = {},
     onTag: (String) -> Unit = {},
     onHistory: (id: String, title: String) -> Unit = { _, _ -> },
+    onConflicts: (id: String, title: String) -> Unit = { _, _ -> },
 ) {
     val app = LocalContext.current.yana
     val vm: Loader<Note> = viewModel(key = "note:$id") { Loader(fetch = { repo.note(id) }) }
     val state by vm.loaded.collectAsStateWithLifecycle()
     val note = state.data
+
+    // Resolving a conflict settles the note behind this screen; coming
+    // back from it refetches, so the banner keeps the list's count.
+    var resolving by rememberSaveable(id) { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(id, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && resolving) {
+                resolving = false
+                vm.reload(pull = true)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Only markdown notes have a CRDT document; HTML notes edit by
     // source and never join the relay.
@@ -145,8 +167,27 @@ fun NoteScreen(
             } else if (note.kind == "html") {
                 // No outer scroll: the WebView and the source editor scroll themselves.
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    NoteHeader(note, Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp))
-                    HtmlNotePane(repo, note, Modifier.widthIn(max = 720.dp).fillMaxWidth().weight(1f))
+                    Column(
+                        Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        NoteHeader(note, Modifier.fillMaxWidth())
+                        if (note.conflictCount > 0) {
+                            ConflictBanner(note.conflictCount) {
+                                resolving = true
+                                onConflicts(id, note.title)
+                            }
+                        }
+                    }
+                    HtmlNotePane(
+                        repo,
+                        note,
+                        Modifier.widthIn(max = 720.dp).fillMaxWidth().weight(1f),
+                        onConflicts = {
+                            resolving = true
+                            onConflicts(id, note.title)
+                        },
+                    )
                 }
             } else if (editing && live != null && liveReady) {
                 MarkdownEditor(
@@ -161,6 +202,12 @@ fun NoteScreen(
                         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
                     ) {
                         NoteHeader(note, Modifier.widthIn(max = 720.dp).fillMaxWidth())
+                        if (note.conflictCount > 0) {
+                            ConflictBanner(note.conflictCount, Modifier.widthIn(max = 720.dp).fillMaxWidth()) {
+                                resolving = true
+                                onConflicts(id, note.title)
+                            }
+                        }
                     }
                     // The reader scrolls itself; the body it renders is the
                     // live document's text once that loads, the cached file
@@ -214,5 +261,37 @@ private fun NoteHeader(note: Note, modifier: Modifier) {
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+/**
+ * The calm banner above a body with conflict copies waiting: what
+ * happened, in the web's words, and the way in to settle it.
+ */
+@Composable
+private fun ConflictBanner(count: Int, modifier: Modifier = Modifier, onOpen: () -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = modifier.fillMaxWidth().clickable(onClick = onOpen),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                YanaIcons.Alert,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                if (count == 1) "1 conflict copy waits — two writes met the same path"
+                else "$count conflict copies wait — two writes met the same path",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
     }
 }

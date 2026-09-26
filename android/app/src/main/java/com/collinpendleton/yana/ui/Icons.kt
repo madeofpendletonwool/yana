@@ -54,6 +54,13 @@ object YanaIcons {
         "M16 17H8",
     ) }
 
+    /** A held breath: the mark a conflict copy carries. */
+    val Alert: ImageVector by lazy { build("triangle-alert",
+        "m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z",
+        "M12 9v4",
+        "M12 17h.01",
+    ) }
+
     private fun build(name: String, vararg paths: String): ImageVector =
         ImageVector.Builder(name = name, defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             for (d in paths) {

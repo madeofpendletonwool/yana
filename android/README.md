@@ -147,6 +147,26 @@ lived, or a free name beside whatever took its path, opening the note
 when it lands. With history off (a build without the git layer) these
 screens say so instead of guessing.
 
+Conflict copies — the `name.conflict-<ts>` files the server parks when
+two writes meet one path — surface and settle the way the web does. A
+note with copies waiting carries a banner above its body
+(`conflict_count` on the note, `GET /api/notes/{id}/conflicts` behind
+it), Settings → Data lists every copy in the account's spaces with the
+count in its row (`GET /api/conflicts`), and both doors open the same
+resolve screen: the copy's diff against its survivor
+(`GET /api/conflicts/{id}/diff`) as the same wrapped, tinted list the
+history screen shows, and the web's three choices over
+`POST /api/conflicts/{id}/resolve` — keep this note (the copy moves to
+the trash), keep the copy (its text becomes this note), keep both (the
+copy is renamed to an ordinary note). Each choice confirms with its
+consequence first, lands as one commit, and the screen closes itself
+when nothing waits. An HTML save that parks a copy says so beside the
+source editor with a Resolve button into the same screen. A copy whose
+original is gone is a plain note; the list opens it instead of
+resolving it. The tree keeps copies out of its rows entirely (they
+nest under their survivor server-side), and search treats them as the
+real notes they are, the same as the web.
+
 Put the SDK location in `android/local.properties`
 (`sdk.dir=/path/to/Android/sdk`) or set `ANDROID_HOME`. Android Studio
 writes the file itself.
@@ -327,8 +347,8 @@ the WebView holds, minted fresh on every open and expiring in five
 minutes. Navigation stays on the content origin; other links open in
 the system browser. The source edits in a plain text screen with
 explicit saves — whole-file, last-write-wins, with the server parking
-the diverged version as a conflict copy it names in the save's
-message. Trust shows as a read-only badge; it changes on the web. An
+the diverged version as a conflict copy the save's notice names, with
+a Resolve button into the conflict screen. Trust shows as a read-only badge; it changes on the web. An
 instrumented test (`NoteWebViewSandboxTest`) runs a hostile note on a
 device and checks that its script cannot fetch the API, read the app
 origin's cookies, or navigate the WebView off the content origin, and

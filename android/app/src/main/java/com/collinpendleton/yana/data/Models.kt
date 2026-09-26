@@ -166,6 +166,8 @@ data class Note(
     /** The note's directory, for resolving relative images and create paths. */
     val base: String = "",
     val links: List<ServerLink> = emptyList(),
+    /** How many conflict copies point at this note, for the banner above its body. */
+    @SerialName("conflict_count") val conflictCount: Int = 0,
 )
 
 /** The content-origin URL a rendered HTML note loads, signed for a few minutes. */
@@ -388,4 +390,51 @@ data class DeletedRestoreResult(
     /** True when the scan has not picked the note up yet; there is nothing to open. */
     val deferred: Boolean = false,
     val from: String = "",
+)
+
+/** One row of the conflicts list: a copy, and the note it belongs to while that survives. */
+@Serializable
+data class ConflictEntry(
+    val note: NoteMeta,
+    /** Omitted when the copy's original is gone; it is a plain note now. */
+    val of: NoteMeta? = null,
+)
+
+@Serializable
+data class ConflictsResponse(val conflicts: List<ConflictEntry> = emptyList())
+
+@Serializable
+data class NoteConflictsResponse(val conflicts: List<NoteMeta> = emptyList())
+
+/** One side of a conflict diff: the survivor is mine, the copy is theirs. */
+@Serializable
+data class ConflictSide(
+    val id: String = "",
+    val path: String = "",
+    val title: String = "",
+)
+
+@Serializable
+data class ConflictDiffResponse(
+    val diff: String = "",
+    val mine: ConflictSide = ConflictSide(),
+    val theirs: ConflictSide = ConflictSide(),
+)
+
+/** The three ways out of a conflict: keep this note, keep the copy, keep both. */
+enum class ConflictAction(val value: String) {
+    Mine("mine"),
+    Theirs("theirs"),
+    Both("both"),
+}
+
+@Serializable
+data class ConflictResolveRequest(val action: String)
+
+/** What a resolution did; [path] is the copy's renamed path, keep-both only. */
+@Serializable
+data class ConflictResolveResponse(
+    val ok: Boolean = false,
+    val action: String = "",
+    val path: String? = null,
 )

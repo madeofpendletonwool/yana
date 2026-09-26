@@ -58,7 +58,12 @@ class HtmlNoteModel : ViewModel() {
         }
     }
 
-    /** Saves the source, last-write-wins; [onSaved] gets the new base hash and any conflict copy name. */
+    /**
+     * Saves the source, last-write-wins; [onSaved] gets the new base
+     * hash and any conflict copy the server parked. The pane makes the
+     * copy its own notice with a way in to resolve it, so the model's
+     * message stays for errors.
+     */
     fun save(repo: NoteRepository, id: String, source: String, baseHash: String, onSaved: (hash: String?, conflictCopy: String?) -> Unit) {
         if (saving.value) return
         saving.value = true
@@ -66,7 +71,7 @@ class HtmlNoteModel : ViewModel() {
             try {
                 val res = repo.saveSource(id, source, baseHash)
                 saving.value = false
-                message.value = res.conflictCopy?.let { "Saved. The version that was on disk moved to $it." }
+                message.value = null
                 onSaved(res.hash, res.conflictCopy)
                 load(repo, id)
             } catch (e: CancellationException) {

@@ -13,6 +13,8 @@ import androidx.navigation.toRoute
 import com.collinpendleton.yana.YanaApp
 import com.collinpendleton.yana.data.normalizeServerUrl
 import com.collinpendleton.yana.ui.screens.ActivityScreen
+import com.collinpendleton.yana.ui.screens.ConflictScreen
+import com.collinpendleton.yana.ui.screens.ConflictsScreen
 import com.collinpendleton.yana.ui.screens.DeletedNotesScreen
 import com.collinpendleton.yana.ui.screens.NoteHistoryScreen
 import com.collinpendleton.yana.ui.screens.NoteScreen
@@ -37,6 +39,10 @@ import kotlinx.serialization.Serializable
 /** [space] is "" for the feed across every space. */
 @Serializable data class ActivityRoute(val space: String = "")
 @Serializable data object DeletedNotesRoute
+/** Every conflict copy in the account's spaces, the Data page's list. */
+@Serializable data object ConflictsRoute
+/** One note's conflict copies and their resolutions; [id] is the surviving note. */
+@Serializable data class ConflictRoute(val id: String, val title: String = "")
 @Serializable data object SettingsRoute
 
 @Composable
@@ -103,6 +109,7 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
                 // Until the tag page lands (12k), a tag opens its search.
                 onTag = { tag -> nav.navigate(SearchRoute(query = "tag:$tag")) },
                 onHistory = { id, title -> nav.navigate(NoteHistoryRoute(id, title)) },
+                onConflicts = { id, title -> nav.navigate(ConflictRoute(id, title)) },
             )
         }
         composable<NoteHistoryRoute> { entry ->
@@ -133,6 +140,23 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
                 onOpenNote = { id, title -> nav.navigate(NoteRoute(id, title)) },
             )
         }
+        composable<ConflictsRoute> {
+            ConflictsScreen(
+                repo = app.repo,
+                onBack = { nav.popBackStack() },
+                onResolve = { id, title -> nav.navigate(ConflictRoute(id, title)) },
+                onOpenNote = { id, title -> nav.navigate(NoteRoute(id, title)) },
+            )
+        }
+        composable<ConflictRoute> { entry ->
+            val r = entry.toRoute<ConflictRoute>()
+            ConflictScreen(
+                repo = app.repo,
+                id = r.id,
+                title = r.title,
+                onBack = { nav.popBackStack() },
+            )
+        }
         composable<SearchRoute> { entry ->
             val r = entry.toRoute<SearchRoute>()
             SearchScreen(
@@ -153,7 +177,12 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
             )
         }
         composable<SettingsRoute> {
-            SettingsScreen(app = app, onBack = { nav.popBackStack() }, onDeletedNotes = { nav.navigate(DeletedNotesRoute) })
+            SettingsScreen(
+                app = app,
+                onBack = { nav.popBackStack() },
+                onDeletedNotes = { nav.navigate(DeletedNotesRoute) },
+                onConflicts = { nav.navigate(ConflictsRoute) },
+            )
         }
     }
 }
