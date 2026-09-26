@@ -15,6 +15,13 @@ have: `tree_nodes`, the flattened folder tree exactly as the server's
 nested response sent it (parent paths carry the nesting, positions the
 ordering), and `pending_ops`, the queue of offline actions.
 
+The tasks page adds two more client-side tables: `tasks_cache`, the last
+fetched tasks listing per filter scope (a scope is the space, tag,
+folder, and open/done toggle joined), and `task_fetches`, each scope's
+fetch time, which is what the offline banner reads its age from. The
+open count that feeds the home screen's Tasks row sits in
+`replica_meta` beside it, with its read time.
+
 A sync pulls three responses on launch, on pull-to-refresh, and from a
 six-hourly WorkManager job when the network is up: `GET /api/spaces`,
 `GET /api/notes` (the flat list the replica is built from), and

@@ -153,3 +153,37 @@ data class ReplicaMetaEntity(
     @PrimaryKey val key: String,
     val value: String,
 )
+
+/**
+ * One row of the last fetched tasks listing, cached per filter scope so
+ * airplane mode shows the list it last had. `ord` keeps the server's
+ * row order (notes newest-updated first, file order within a note); the
+ * task's own fields ride along beside the trimmed note they belong to.
+ */
+@Entity(
+    tableName = "tasks_cache",
+    primaryKeys = ["scope", "note_id", "line"],
+    indices = [Index("scope")],
+)
+data class TaskCacheEntity(
+    val scope: String,
+    @ColumnInfo(name = "note_id") val noteId: String,
+    val line: Int,
+    val indent: Int = 0,
+    val text: String = "",
+    val done: Boolean = false,
+    @ColumnInfo(name = "done_at") val doneAt: String? = null,
+    val heading: String = "",
+    val ord: Int = 0,
+    val space: String = "",
+    val path: String = "",
+    val title: String = "",
+    val kind: String = "md",
+)
+
+/** When a filter scope's task list was last fetched, for its age offline. */
+@Entity(tableName = "task_fetches")
+data class TaskFetchEntity(
+    @PrimaryKey val scope: String,
+    @ColumnInfo(name = "fetched_at") val fetchedAt: Long,
+)

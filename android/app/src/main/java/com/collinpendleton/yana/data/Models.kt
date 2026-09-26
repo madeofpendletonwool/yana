@@ -103,6 +103,48 @@ data class ServerLink(
 @Serializable
 data class TaskTickRequest(val note: String, val line: Int, val done: Boolean)
 
+/**
+ * The note a task sits in, without the payload-heavy fields — the same
+ * trimmed shape the web's tasks page carries.
+ */
+@Serializable
+data class TaskNote(
+    val id: String,
+    val space: String = "",
+    val path: String = "",
+    val title: String = "",
+    val kind: String = "md",
+)
+
+/**
+ * One `- [ ]` line of a note, as the tasks page lists it. [text] is the
+ * line's markdown rendered to inline HTML at scan time; [line] is the
+ * body line the rendered checkbox's data-line carries.
+ */
+@Serializable
+data class TaskRow(
+    val note: TaskNote,
+    val line: Int,
+    val indent: Int = 0,
+    val text: String = "",
+    val done: Boolean = false,
+    @SerialName("done_at") val doneAt: String? = null,
+    val heading: String = "",
+)
+
+@Serializable
+data class TasksResponse(val tasks: List<TaskRow> = emptyList())
+
+@Serializable
+data class TaskCountResponse(val count: Int = 0)
+
+/** One #tag and how many notes carry it, for the tag filter. */
+@Serializable
+data class TagCount(val tag: String, val count: Int = 0)
+
+@Serializable
+data class TagsResponse(val tags: List<TagCount> = emptyList())
+
 @Serializable
 data class Note(
     val id: String,

@@ -22,6 +22,7 @@ data class ClientFrame(
     val u: ByteArray? = null,
     val a: String? = null,
     val p: ByteArray? = null,
+    val s: String? = null,
 )
 
 /** Server-to-client frame. */
@@ -56,7 +57,7 @@ object Rt {
 
 /** Encodes one frame; field order matches the server's structs. */
 fun encodeClientFrame(f: ClientFrame): ByteArray =
-    encodeFrame(listOfNotNull("t" to f.t, f.n?.let { "n" to it }, f.sv?.let { "sv" to it }, f.u?.let { "u" to it }, f.a?.let { "a" to it }, f.p?.let { "p" to it }))
+    encodeFrame(listOfNotNull("t" to f.t, f.n?.let { "n" to it }, f.sv?.let { "sv" to it }, f.u?.let { "u" to it }, f.a?.let { "a" to it }, f.p?.let { "p" to it }, f.s?.let { "s" to it }))
 
 /** Encodes one server frame; the test suite's fake relay speaks this. */
 fun encodeServerFrame(f: ServerFrame): ByteArray =
@@ -111,6 +112,7 @@ fun decodeClientFrame(b: ByteArray): ClientFrame? = decodeFrame(b)?.let {
         u = it["u"] as? ByteArray,
         a = it["a"] as? String,
         p = it["p"] as? ByteArray,
+        s = it["s"] as? String,
     )
 }
 

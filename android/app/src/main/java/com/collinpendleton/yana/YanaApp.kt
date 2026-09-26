@@ -14,6 +14,7 @@ import com.collinpendleton.yana.data.replica.ReplicaStore
 import com.collinpendleton.yana.data.rt.CrdtSyncScheduler
 import com.collinpendleton.yana.data.rt.GoDocFactory
 import com.collinpendleton.yana.data.rt.OkHttpRtTransport
+import com.collinpendleton.yana.data.rt.RtStatus
 import com.collinpendleton.yana.data.rt.SyncEngine
 import com.collinpendleton.yana.ui.theme.ThemeMode
 import kotlinx.coroutines.CoroutineScope
@@ -63,6 +64,19 @@ class YanaApp : Application() {
                 if (s == null) {
                     store.wipe()
                     syncEngine.shutdown()
+                }
+            }
+        }
+        // A connection coming back replays whatever the offline queue
+        // holds — a tick from airplane mode, a create, a move — the
+        // catch-up the web's outbox does on reconnect.
+        scope.launch {
+            var prev: RtStatus? = null
+            syncEngine.status.collect { s ->
+                val wasOffline = prev == RtStatus.Offline
+                prev = s
+                if (wasOffline && s != RtStatus.Offline && client.session.value != null) {
+                    runCatching { repo.sync() }
                 }
             }
         }

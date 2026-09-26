@@ -67,6 +67,20 @@ interface NoteRepository {
     suspend fun tickTask(noteId: String, line: Int, done: Boolean): TickOutcome
 
     /**
+     * One tasks listing over `GET /api/tasks`: the rows the filters
+     * name, from the server when it answers and from the cache (with its
+     * age) when it cannot. Nothing cached rethrows, so the screen can
+     * say why it has no list.
+     */
+    suspend fun tasks(scope: TaskScope): TasksResult
+
+    /** The account's tags with note counts; the replica's when offline. */
+    suspend fun tags(): List<TagCount>
+
+    /** The open count across every space, with when it was read; null when never known. */
+    suspend fun openTaskCount(): TaskCount?
+
+    /**
      * The note a dashed wikilink creates, made now when the server is
      * reachable; offline the create queues and returns null — there is
      * no id to open until the next sync replays it.
@@ -97,9 +111,34 @@ sealed interface TickOutcome {
      */
     data class Queued(val body: String?) : TickOutcome
 
-    /** The server refused it (a viewer's space, the note gone, the line moved). */
-    data class Refused(val message: String) : TickOutcome
+    /**
+     * The server refused it (a viewer's space, the note gone, the line
+     * moved). [status] carries the HTTP code — 409 says the line is not
+     * an unticked box anymore and the list catches up on its own.
+     */
+    data class Refused(val message: String, val status: Int? = null) : TickOutcome
 }
+
+/** The tasks page's filters. [key] is the cache's scope string. */
+data class TaskScope(
+    val space: String = "",
+    val tag: String = "",
+    val path: String = "",
+    /** True lists completed tasks from the last 30 days instead of open ones. */
+    val done: Boolean = false,
+) {
+    val key: String get() = (if (done) "d" else "o") + "\u0000" + space + "\u0000" + tag + "\u0000" + path
+}
+
+/** One tasks listing: the rows, where they came from, and when (epoch ms). */
+data class TasksResult(
+    val rows: List<TaskRow>,
+    val fromServer: Boolean,
+    val fetchedAt: Long?,
+)
+
+/** The open count across every space, with when it was read. */
+data class TaskCount(val count: Int, val fetchedAt: Long)
 
 /** One search result, the same shape whether the server or the replica produced it. */
 data class SearchResult(
@@ -211,12 +250,67 @@ class YanaNoteRepository(
             throw e
         } catch (e: IOException) {
             // Offline: the tick rides with the next sync and the cached
-            // body flips now, so the box reads back ticked.
+            // body flips now, so the box reads back ticked — in the note
+            // and in every cached listing that shows the row.
             store.enqueueTask(TaskOp(noteId, line, done))
+            store.flipCachedTaskRows(noteId, line, done)
             val flipped = store.flipCachedTask(noteId, line, done)
             TickOutcome.Queued(flipped)
         } catch (e: HttpException) {
-            TickOutcome.Refused(e.userMessage())
+            TickOutcome.Refused(e.userMessage(), e.code())
+        }
+    }
+
+    override suspend fun tasks(scope: TaskScope): TasksResult {
+        bind()
+        return try {
+            val res = client.api().tasks(
+                space = scope.space.ifEmpty { null },
+                done = if (scope.done) true else null,
+                tag = scope.tag.ifEmpty { null },
+                path = scope.path.ifEmpty { null },
+            )
+            store.cacheTasks(scope.key, res.tasks)
+            TasksResult(res.tasks, fromServer = true, fetchedAt = System.currentTimeMillis())
+        } catch (e: YanaClient.NotSignedIn) {
+            throw e
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            val cached = store.cachedTasks(scope.key) ?: throw e
+            TasksResult(cached.first, fromServer = false, fetchedAt = cached.second)
+        }
+    }
+
+    override suspend fun tags(): List<TagCount> {
+        bind()
+        return try {
+            client.api().tags().tags
+        } catch (e: YanaClient.NotSignedIn) {
+            throw e
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            store.tagCounts()
+        } catch (e: HttpException) {
+            store.tagCounts()
+        }
+    }
+
+    override suspend fun openTaskCount(): TaskCount? {
+        bind()
+        return try {
+            val count = client.api().taskCount().count
+            store.cacheTaskCount(count)
+            TaskCount(count, System.currentTimeMillis())
+        } catch (e: YanaClient.NotSignedIn) {
+            throw e
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            store.cachedTaskCount()?.let { TaskCount(it.first, it.second) }
+        } catch (e: HttpException) {
+            store.cachedTaskCount()?.let { TaskCount(it.first, it.second) }
         }
     }
 

@@ -7,6 +7,9 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.collinpendleton.yana.data.NoteMeta
 import com.collinpendleton.yana.data.Space
 import com.collinpendleton.yana.data.SpaceTree
+import com.collinpendleton.yana.data.TagCount
+import com.collinpendleton.yana.data.TaskNote
+import com.collinpendleton.yana.data.TaskRow
 import com.collinpendleton.yana.data.TreeNode
 import com.collinpendleton.yana.data.YanaJson
 import com.collinpendleton.yana.data.indexText
@@ -67,7 +70,7 @@ class ReplicaStore(private val db: ReplicaDatabase) : com.collinpendleton.yana.d
         fun open(context: Context): ReplicaStore {
             val db = Room.databaseBuilder(context, ReplicaDatabase::class.java, "replica.db")
                 .setDriver(BundledSQLiteDriver())
-                .addMigrations(ReplicaDatabase.MIGRATION_1_2)
+                .addMigrations(ReplicaDatabase.MIGRATION_1_2, ReplicaDatabase.MIGRATION_2_3)
                 .addCallback(object : androidx.room.RoomDatabase.Callback() {
                     // onOpen re-runs the DDL; every statement is IF NOT
                     // EXISTS, so a database that somehow arrived without
@@ -161,6 +164,72 @@ class ReplicaStore(private val db: ReplicaDatabase) : com.collinpendleton.yana.d
         dao.storeBody(noteId, body, rawNext)
         return rawNext
     }
+
+    // --- the tasks cache ------------------------------------------------------
+
+    /** Caches one filter scope's listing with its fetch time. */
+    suspend fun cacheTasks(scope: String, rows: List<TaskRow>) {
+        dao.replaceTasks(
+            scope,
+            rows.mapIndexed { i, t ->
+                TaskCacheEntity(
+                    scope = scope,
+                    noteId = t.note.id,
+                    line = t.line,
+                    indent = t.indent,
+                    text = t.text,
+                    done = t.done,
+                    doneAt = t.doneAt,
+                    heading = t.heading,
+                    ord = i,
+                    space = t.note.space,
+                    path = t.note.path,
+                    title = t.note.title,
+                    kind = t.note.kind,
+                )
+            },
+            System.currentTimeMillis(),
+        )
+    }
+
+    /** The cached listing of one scope with its fetch time, or null when absent. */
+    suspend fun cachedTasks(scope: String): Pair<List<TaskRow>, Long>? {
+        val at = dao.taskFetchTime(scope) ?: return null
+        val rows = dao.tasksOf(scope)
+        if (rows.isEmpty()) return null
+        return rows.map { it.toRow() } to at
+    }
+
+    /** Flips one box in every cached listing it appears in, the listing's half of an offline tick. */
+    suspend fun flipCachedTaskRows(noteId: String, line: Int, done: Boolean) = dao.flipTaskRow(noteId, line, done)
+
+    private fun TaskCacheEntity.toRow() = TaskRow(
+        note = TaskNote(id = noteId, space = space, path = path, title = title, kind = kind),
+        line = line,
+        indent = indent,
+        text = text,
+        done = done,
+        doneAt = doneAt,
+        heading = heading,
+    )
+
+    // --- the open-task count --------------------------------------------------
+
+    /** Caches the open count and when it was read, the home screen's badge. */
+    suspend fun cacheTaskCount(count: Int) {
+        dao.setMeta(ReplicaMetaEntity("task_count", count.toString()))
+        dao.setMeta(ReplicaMetaEntity("task_count_at", System.currentTimeMillis().toString()))
+    }
+
+    /** The cached open count with its read time, or null when never fetched. */
+    suspend fun cachedTaskCount(): Pair<Int, Long>? {
+        val count = dao.meta("task_count")?.toIntOrNull() ?: return null
+        val at = dao.meta("task_count_at")?.toLongOrNull() ?: return null
+        return count to at
+    }
+
+    /** The replica's tag counts, the tag filter's offline answer. */
+    suspend fun tagCounts(): List<TagCount> = dao.tagCounts().map { TagCount(it.tag, it.count) }
 
     /** Every note of one space, the refs wikilink resolution runs over. */
     suspend fun spaceNoteRefs(space: String): List<com.collinpendleton.yana.data.NoteRef> =

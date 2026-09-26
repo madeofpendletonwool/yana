@@ -76,6 +76,7 @@ fun NoteScreen(
     sync: SyncEngine,
     id: String,
     title: String,
+    atLine: Int = -1,
     onBack: () -> Unit,
     onOpenNote: (String) -> Unit = {},
     onTag: (String) -> Unit = {},
@@ -158,7 +159,7 @@ fun NoteScreen(
                     }
                     // The reader scrolls itself; the body it renders is the
                     // live document's text once that loads, the cached file
-                    // until then.
+                    // until then. A tasks row opens the note at its line.
                     val body = if (liveReady) liveText else note.markdown?.let(::markdownBody)
                     key(note.id, dark) {
                         ReaderPane(
@@ -167,6 +168,7 @@ fun NoteScreen(
                             note = note,
                             body = body,
                             dark = dark,
+                            atLine = atLine,
                             onOpenNote = onOpenNote,
                             onTag = onTag,
                             onToast = toast,

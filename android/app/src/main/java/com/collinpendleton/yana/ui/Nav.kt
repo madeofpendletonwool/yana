@@ -19,14 +19,17 @@ import com.collinpendleton.yana.ui.screens.SettingsScreen
 import com.collinpendleton.yana.ui.screens.SignInScreen
 import com.collinpendleton.yana.ui.screens.SpaceScreen
 import com.collinpendleton.yana.ui.screens.SpacesScreen
+import com.collinpendleton.yana.ui.screens.TasksScreen
 import kotlinx.serialization.Serializable
 
 @Serializable data object ServerRoute
 @Serializable data class SignInRoute(val server: String, val setup: Boolean)
 @Serializable data object SpacesRoute
 @Serializable data class SpaceRoute(val name: String, val label: String)
-@Serializable data class NoteRoute(val id: String, val title: String)
+/** [line] is the body line a tasks row opens the note at; -1 opens at the top. */
+@Serializable data class NoteRoute(val id: String, val title: String, val line: Int = -1)
 @Serializable data class SearchRoute(val query: String = "")
+@Serializable data class TasksRoute(val space: String = "")
 @Serializable data object SettingsRoute
 
 @Composable
@@ -65,6 +68,7 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
                 onSpace = { nav.navigate(SpaceRoute(it.name, it.displayName)) },
                 onSearch = { nav.navigate(SearchRoute()) },
                 onSettings = { nav.navigate(SettingsRoute) },
+                onTasks = { nav.navigate(TasksRoute()) },
             )
         }
         composable<SpaceRoute> { entry ->
@@ -84,6 +88,7 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
                 sync = app.syncEngine,
                 id = r.id,
                 title = r.title,
+                atLine = r.line,
                 onBack = { nav.popBackStack() },
                 onOpenNote = { id -> nav.navigate(NoteRoute(id, "")) },
                 // Until the tag page lands (12k), a tag opens its search.
@@ -97,6 +102,16 @@ fun YanaNavHost(app: YanaApp, nav: NavHostController = rememberNavController()) 
                 initialQuery = r.query,
                 onBack = { nav.popBackStack() },
                 onNote = { id, title -> nav.navigate(NoteRoute(id, title)) },
+            )
+        }
+        composable<TasksRoute> { entry ->
+            val r = entry.toRoute<TasksRoute>()
+            TasksScreen(
+                repo = app.repo,
+                sync = app.syncEngine,
+                initialSpace = r.space,
+                onBack = { nav.popBackStack() },
+                onNote = { id, title, line -> nav.navigate(NoteRoute(id, title, line)) },
             )
         }
         composable<SettingsRoute> {
