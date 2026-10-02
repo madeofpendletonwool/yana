@@ -855,7 +855,7 @@ function Reader({ html, sync, note, readOnly, cls, onOpen, onLinkMenu, onTag, hi
       last = text
       const mine = ++seq
       api
-        .render(text)
+        .render(text, note.id)
         .then(({ html }) => {
           if (mine !== seq) return
           el.innerHTML = html

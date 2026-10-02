@@ -1,9 +1,10 @@
 import { api } from './api'
-import type { UnresolvedLink } from './api'
+import type { AliasConflict, UnresolvedLink } from './api'
 import { h, clear } from './dom'
 
 // The unresolved-link report: every broken wikilink in the tree, grouped
-// by space. Clicking a row opens the note holding the link.
+// by space, plus the aliases two notes claim at once. Clicking a row
+// opens the note holding the link.
 export function renderUnresolvedReport(
   container: HTMLElement,
   onOpen: (id: string) => void,
@@ -18,11 +19,11 @@ export function renderUnresolvedReport(
   )
   api
     .unresolved()
-    .then(({ unresolved }) => {
+    .then(({ unresolved, alias_conflicts: conflicts }) => {
       clear(container)
       const article = h('article', { class: 'report unresolved-report' })
       article.append(h('header', { class: 'report-head' }, h('h1', { class: 'report-title' }, 'Unresolved links')))
-      if (unresolved.length === 0) {
+      if (unresolved.length === 0 && conflicts.length === 0) {
         article.append(h('div', { class: 'empty-state' }, h('p', {}, 'Every wikilink points at a note that exists.')))
         container.append(article)
         return
@@ -49,11 +50,17 @@ export function renderUnresolvedReport(
                   onOpen(u.note.id)
                 },
               }, u.note.path),
-              h('span', { class: 'unresolved-target' }, `[[${u.raw_target}]]`),
+              h('span', { class: 'unresolved-target' }, `${u.kind === 'embed' ? '!' : ''}[[${u.raw_target}]]`),
             ),
           )
         }
         article.append(section)
+      }
+      if (conflicts.length > 0) {
+        const section = h('section', { class: 'unresolved-space alias-conflicts' },
+          h('h2', { class: 'section-title' }, 'Aliases claimed twice'))
+        article.append(section)
+        for (const c of conflicts) section.append(conflictRow(c, onOpen))
       }
       container.append(article)
     })
@@ -64,4 +71,25 @@ export function renderUnresolvedReport(
           h('p', { class: 'error' }, 'Could not load the unresolved links.'),
           h('button', { class: 'btn', onClick: () => reload() }, 'Try again')))
     })
+}
+
+// One contested alias: the name and both notes claiming it, each opening
+// its note so the duplicate can be sorted out.
+function conflictRow(c: AliasConflict, onOpen: (id: string) => void): HTMLLIElement {
+  const links = c.notes.map((n) => {
+    const a = h('a', {
+      class: 'unresolved-note',
+      href: `/n/${n.id}`,
+      title: n.path,
+      onClick: (ev) => {
+        ev.preventDefault()
+        onOpen(n.id)
+      },
+    }, n.path)
+    return a
+  })
+  const row = h('li', { class: 'unresolved-row alias-conflict' },
+    h('span', { class: 'unresolved-target' }, `[[${c.alias}]]`), links[0] ?? null)
+  for (const l of links.slice(1)) row.append(h('span', { class: 'muted' }, 'and'), l)
+  return row
 }

@@ -377,7 +377,12 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	tree := buildTree(notes, tags)
+	aliases, err := s.DB.AllAliases(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	tree := buildTree(notes, tags, aliases)
 	if tree == nil {
 		tree = []SpaceTree{}
 	}
@@ -527,7 +532,7 @@ func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, r, err)
 			return
 		}
-		resp.HTML = string(html)
+		resp.HTML = string(s.inlineEmbeds(r.Context(), n, html))
 		resp.Markdown = string(raw)
 	case "html":
 		// Rendering happens on the separate content origin (see

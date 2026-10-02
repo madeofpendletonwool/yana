@@ -144,6 +144,26 @@ func StripHTML(src []byte) string {
 // inside code fences and code spans are skipped exactly as they are in the
 // rendered output.
 func WikiLinks(body []byte) []string {
+	return collectTargets(body, func(n ast.Node) ([]byte, bool) {
+		if wl, ok := n.(*WikiLink); ok {
+			return wl.Target, true
+		}
+		return nil, false
+	})
+}
+
+// WikiEmbeds returns the distinct raw targets of the ![[embeds]] in body,
+// in first-seen order, under the same rules as WikiLinks.
+func WikiEmbeds(body []byte) []string {
+	return collectTargets(body, func(n ast.Node) ([]byte, bool) {
+		if we, ok := n.(*WikiEmbed); ok {
+			return we.Target, true
+		}
+		return nil, false
+	})
+}
+
+func collectTargets(body []byte, want func(ast.Node) ([]byte, bool)) []string {
 	pctx := parser.NewContext()
 	doc := engine().Parser().Parse(text.NewReader(body), parser.WithContext(pctx))
 	seen := map[string]struct{}{}
@@ -152,11 +172,11 @@ func WikiLinks(body []byte) []string {
 		if !entering {
 			return ast.WalkContinue, nil
 		}
-		if wl, ok := n.(*WikiLink); ok {
-			t := string(wl.Target)
-			if _, dup := seen[t]; !dup {
-				seen[t] = struct{}{}
-				out = append(out, t)
+		if t, ok := want(n); ok {
+			s := string(t)
+			if _, dup := seen[s]; !dup {
+				seen[s] = struct{}{}
+				out = append(out, s)
 			}
 			return ast.WalkSkipChildren, nil
 		}
@@ -198,10 +218,13 @@ func (e *wikilinkExt) Extend(m goldmark.Markdown) {
 
 type wikilinkParser struct{}
 
-func (p *wikilinkParser) Trigger() []byte { return []byte{'['} }
+func (p *wikilinkParser) Trigger() []byte { return []byte{'[', '!'} }
 
 func (p *wikilinkParser) Parse(parent ast.Node, block text.Reader, pc parser.Context) ast.Node {
 	line, seg := block.PeekLine()
+	if line[0] == '!' {
+		return parseEmbed(line, seg, block)
+	}
 	if len(line) < 4 || line[0] != '[' || line[1] != '[' {
 		return nil
 	}
@@ -232,10 +255,39 @@ func (p *wikilinkParser) Parse(parent ast.Node, block text.Reader, pc parser.Con
 	return node
 }
 
+// parseEmbed reads ![[target]]: the embed form. A `|` inside is accepted
+// and ignored — an embed shows the target's own body, not a display text.
+func parseEmbed(line []byte, seg text.Segment, block text.Reader) ast.Node {
+	if len(line) < 6 || line[1] != '[' || line[2] != '[' {
+		return nil
+	}
+	end := bytes.Index(line, []byte("]]"))
+	if end < 3 {
+		return nil
+	}
+	inner := line[3:end]
+	if bytes.ContainsAny(inner, "[]\n") || len(bytes.TrimSpace(inner)) == 0 {
+		return nil
+	}
+	target := inner
+	if i := bytes.IndexByte(inner, '|'); i >= 0 {
+		target = inner[:i]
+	}
+	target = bytes.TrimSpace(target)
+	if len(target) == 0 {
+		return nil
+	}
+	node := &WikiEmbed{Target: target}
+	node.AppendChild(node, ast.NewTextSegment(text.NewSegment(seg.Start+3, seg.Start+end)))
+	block.Advance(end + 2)
+	return node
+}
+
 type wikilinkRenderer struct{}
 
 func (r *wikilinkRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
 	reg.Register(kindWikiLink, r.render)
+	reg.Register(kindWikiEmbed, r.renderEmbed)
 }
 
 func (r *wikilinkRenderer) render(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -247,6 +299,38 @@ func (r *wikilinkRenderer) render(w util.BufWriter, source []byte, node ast.Node
 	_, _ = w.Write(util.EscapeHTML(n.Target))
 	_, _ = w.WriteString(`">`)
 	_, _ = w.Write(util.EscapeHTML(n.Display))
+	_, _ = w.WriteString(`</span>`)
+	return ast.WalkSkipChildren, nil
+}
+
+// WikiEmbed is the AST node for ![[target]]. The renderer emits a span
+// carrying the raw target and showing the target's name; the server's
+// read view replaces it with the target's body, and every other surface
+// (a raw render, an export) shows it as a reference to follow.
+type WikiEmbed struct {
+	ast.BaseInline
+	Target []byte
+}
+
+var kindWikiEmbed = ast.NewNodeKind("WikiEmbed")
+
+// Kind implements ast.Node.
+func (n *WikiEmbed) Kind() ast.NodeKind { return kindWikiEmbed }
+
+// Dump implements ast.Node.
+func (n *WikiEmbed) Dump(source []byte, level int) {
+	ast.DumpHelper(n, source, level, map[string]string{"Target": string(n.Target)}, nil)
+}
+
+func (r *wikilinkRenderer) renderEmbed(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkSkipChildren, nil
+	}
+	n := node.(*WikiEmbed)
+	_, _ = w.WriteString(`<span class="wikiembed" data-target="`)
+	_, _ = w.Write(util.EscapeHTML(n.Target))
+	_, _ = w.WriteString(`">`)
+	_, _ = w.Write(util.EscapeHTML(n.Target))
 	_, _ = w.WriteString(`</span>`)
 	return ast.WalkSkipChildren, nil
 }

@@ -165,14 +165,19 @@ func (r *Reconciler) planRewrites(ctx context.Context, row index.Note, clean str
 	if err != nil {
 		return nil, 0, err
 	}
+	aliases, err := r.db.AllAliases(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
 	refs := make([]wikilink.NoteRef, len(notes))
 	for i, n := range notes {
-		refs[i] = wikilink.NoteRef{ID: n.ID, RelPath: n.RelPath}
+		refs[i] = wikilink.NoteRef{ID: n.ID, RelPath: n.RelPath, Aliases: aliases[n.ID]}
 	}
 	res := wikilink.NewResolver(row.Space, refs)
 
 	var rewrites []linkRewrite
 	broken := 0
+	seen := map[string]struct{}{}
 	for _, in := range inbound {
 		if in.FromSpace != row.Space {
 			continue
@@ -183,10 +188,27 @@ func (r *Reconciler) planRewrites(ctx context.Context, row index.Note, clean str
 			// reindex that follows the body already recomputed it.
 			continue
 		}
+		if got.Rule == wikilink.RuleAlias {
+			// A link written through an alias is left as written: the
+			// alias follows the note's id, so it still resolves. A move
+			// into another space carries the alias out of reach, so the
+			// link left behind counts as broken like any other.
+			if crossSpace {
+				broken++
+			}
+			continue
+		}
 		if crossSpace {
 			broken++
 			continue
 		}
+		// A link and an embed of the same target from one note are two
+		// rows but one text; rewrite it once.
+		key := in.FromID + "\x00" + in.RawTarget
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
 		rewrites = append(rewrites, linkRewrite{
 			fromID: in.FromID,
 			oldRaw: in.RawTarget,

@@ -3,8 +3,8 @@
 // boundary: a link never reaches into another top-level directory.
 //
 // The order is fixed: exact relative path from the linking note, exact path
-// from the space root, unique filename match anywhere in the space, then
-// unresolved.
+// from the space root, unique filename match anywhere in the space, unique
+// alias match anywhere in the space, then unresolved.
 package wikilink
 
 import (
@@ -19,33 +19,50 @@ const (
 	RuleRelative Rule = "relative"
 	RuleRoot     Rule = "root"
 	RuleFilename Rule = "filename"
+	RuleAlias    Rule = "alias"
 )
 
 // NoteRef is one indexed note a target can resolve to.
 type NoteRef struct {
 	ID      string
 	RelPath string // relative to the notes root, space prefix included
+	Aliases []string
 }
 
 // Resolver resolves raw targets within one space.
 type Resolver struct {
-	space  string
-	byPath map[string]string   // rel path → note id
-	byBase map[string][]string // base name → note ids
+	space   string
+	byPath  map[string]string   // rel path → note id
+	byBase  map[string][]string // base name → note ids
+	byAlias map[string][]string // alias → note ids
 }
 
 // NewResolver indexes the notes of one space. space is the top-level
 // directory name, "" for notes loose in the root.
 func NewResolver(space string, refs []NoteRef) *Resolver {
 	r := &Resolver{
-		space:  space,
-		byPath: make(map[string]string, len(refs)),
-		byBase: make(map[string][]string, len(refs)),
+		space:   space,
+		byPath:  make(map[string]string, len(refs)),
+		byBase:  make(map[string][]string, len(refs)),
+		byAlias: make(map[string][]string),
 	}
+	seen := map[string]struct{}{}
 	for _, ref := range refs {
 		r.byPath[ref.RelPath] = ref.ID
 		base := path.Base(ref.RelPath)
 		r.byBase[base] = append(r.byBase[base], ref.ID)
+		for _, a := range ref.Aliases {
+			a = strings.TrimSpace(a)
+			if a == "" {
+				continue
+			}
+			key := a + "\x00" + ref.ID
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			r.byAlias[a] = append(r.byAlias[a], ref.ID)
+		}
 	}
 	return r
 }
@@ -83,6 +100,15 @@ func (r *Resolver) Resolve(raw, fromRel string) Resolution {
 		cands := r.byBase[withExtension(raw)]
 		if len(cands) == 1 {
 			return Resolution{ToID: cands[0], Rule: RuleFilename, OK: true}
+		}
+	}
+	// 4. Unique alias match anywhere in the space. An alias is a name a
+	// note claims in its frontmatter, matched exactly as written; two
+	// notes claiming the same alias leave the link unresolved rather
+	// than guessing.
+	if !strings.Contains(raw, "/") {
+		if cands := r.byAlias[raw]; len(cands) == 1 {
+			return Resolution{ToID: cands[0], Rule: RuleAlias, OK: true}
 		}
 	}
 	return Resolution{}
@@ -129,11 +155,12 @@ func HasExtension(raw string) bool {
 // RewriteTarget computes the raw target that keeps a link pointing at a
 // note after it moved to newRel, preserving the style the author chose:
 // relative links stay relative to the linking note, root-path links stay
-// rooted, filename links keep naming just the file. fromRel is the linking
-// note's path, newRel the moved note's new path, both relative to the notes
-// root with the space prefix included, and both inside the same space.
-// keepExtension says whether the original raw target spelled out the
-// extension.
+// rooted, filename links keep naming just the file. An alias-rule match
+// is never rewritten: the alias travels with the note's id, so the link
+// as written still resolves. fromRel is the linking note's path, newRel
+// the moved note's new path, both relative to the notes root with the
+// space prefix included, and both inside the same space. keepExtension
+// says whether the original raw target spelled out the extension.
 func RewriteTarget(rule Rule, fromRel, newRel string, keepExtension bool) string {
 	target := newRel
 	if !keepExtension {

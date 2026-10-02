@@ -23,13 +23,20 @@ func upsert(t *testing.T, db *DB, id, rel, body string) {
 }
 
 func upsertKind(t *testing.T, db *DB, id, rel, kind, body, raw string) {
+	upsertWith(t, db, id, rel, kind, body, raw, nil)
+}
+
+func upsertWith(t *testing.T, db *DB, id, rel, kind, body, raw string, aliases []string) {
 	t.Helper()
 	now := time.Now().UTC()
 	err := db.Write(context.Background(), func(tx *sql.Tx) error {
-		return UpsertNote(tx, Note{
+		if err := UpsertNote(tx, Note{
 			ID: id, Space: spaceOfPath(rel), RelPath: rel, Title: id, Kind: kind,
 			ContentHash: id, MTime: now, Created: now, UpdatedAt: now,
-		}, body, raw, nil)
+		}, body, raw, nil); err != nil {
+			return err
+		}
+		return ReplaceAliases(tx, id, spaceOfPath(rel), aliases)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -216,5 +223,87 @@ func TestHTMLNoteLinks(t *testing.T) {
 	}
 	if len(back) != 1 || back[0].Note.ID != "dash" {
 		t.Fatalf("backlinks = %+v", back)
+	}
+}
+
+// Aliases resolve as step 4, conflicts stay unresolved and are
+// reported, and embeds are recorded as their own link kind.
+func TestAliasesAndEmbeds(t *testing.T) {
+	db := openLinksDB(t)
+	ctx := context.Background()
+
+	upsertWith(t, db, "home", "main/home.md", "md",
+		"See [[Mom]] and ![[meals]] and [[nope]].\n", "See [[Mom]] and ![[meals]] and [[nope]].\n", nil)
+	upsertWith(t, db, "margaret", "main/people/margaret.md", "md", "# Margaret\n", "# Margaret\n",
+		[]string{"Mom", "Margaret"})
+	upsertWith(t, db, "meals", "main/meals.md", "md", "# Meals\nSpaghetti.\n", "# Meals\nSpaghetti.\n", nil)
+
+	if err := db.Write(ctx, func(tx *sql.Tx) error { return RecomputeSpaceLinks(tx, "main") }); err != nil {
+		t.Fatal(err)
+	}
+	out, err := db.OutboundLinks(ctx, "home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byRaw := map[string]OutboundLink{}
+	for _, l := range out {
+		byRaw[l.RawTarget+"\x00"+l.Kind] = l
+	}
+	if l := byRaw["Mom\x00link"]; !l.Resolved || l.ToID != "margaret" {
+		t.Fatalf("alias link = %+v", l)
+	}
+	if l := byRaw["meals\x00embed"]; !l.Resolved || l.ToID != "meals" {
+		t.Fatalf("embed link = %+v", l)
+	}
+	if l := byRaw["meals\x00link"]; l.Resolved {
+		t.Fatalf("embed leaked into links: %+v", l)
+	}
+	if l := byRaw["nope\x00link"]; l.Resolved {
+		t.Fatalf("missing link = %+v", l)
+	}
+
+	// A second claimant on "Mom" unresolves the link and reports both.
+	upsertWith(t, db, "maggie", "main/people/maggie.md", "md", "# Maggie\n", "# Maggie\n",
+		[]string{"Mom"})
+	if err := db.Write(ctx, func(tx *sql.Tx) error { return RecomputeSpaceLinks(tx, "main") }); err != nil {
+		t.Fatal(err)
+	}
+	out, err = db.OutboundLinks(ctx, "home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range out {
+		if l.RawTarget == "Mom" && l.Resolved {
+			t.Fatalf("conflicted alias still resolves: %+v", l)
+		}
+	}
+	conflicts, err := db.AliasConflicts(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != 1 || conflicts[0].Alias != "Mom" || len(conflicts[0].Notes) != 2 {
+		t.Fatalf("conflicts = %+v", conflicts)
+	}
+	ids := map[string]bool{}
+	for _, n := range conflicts[0].Notes {
+		ids[n.ID] = true
+	}
+	if !ids["margaret"] || !ids["maggie"] {
+		t.Fatalf("conflict names = %+v", conflicts[0].Notes)
+	}
+
+	// Backlinks carry the kind; the embed shows up with its context line.
+	back, err := db.Backlinks(ctx, "meals")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back) != 1 || back[0].Kind != "embed" {
+		t.Fatalf("embed backlink = %+v", back)
+	}
+
+	// The rename path sees the alias link; SameAliasSet spots changes.
+	if !SameAliasSet([]string{"Mom", "Margaret"}, []string{"Margaret", "Mom"}) ||
+		SameAliasSet([]string{"Mom"}, []string{"Mom", "Margaret"}) {
+		t.Fatal("SameAliasSet is wrong")
 	}
 }

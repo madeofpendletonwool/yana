@@ -30,6 +30,9 @@ What the agent should know:
 - Do not invent frontmatter ids. A file without `id` gets one on its
   next scan; a file with an invented id keeps it forever, including the
   collisions.
+- The optional frontmatter keys the server reads are `order`, `trusted`
+  and `aliases` (an inline list, `aliases: [Mom, Margaret]`, giving the
+  note extra names `[[links]]` resolve by — see [links.md](links.md)).
 - Write files completely and finish, or write to a temporary name and
   `mv` into place; a file still being written is indexed after it
   settles.

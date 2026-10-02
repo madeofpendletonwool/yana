@@ -551,7 +551,9 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
 
   // What the editor offers after `[[` and `#`: the notes of the space
   // (a link resolves within its space) and every tag in use. A note
-  // links by its file name; twins in one space link by their path.
+  // links by its file name; twins in one space link by their path. An
+  // alias from a note's frontmatter completes as "alias → title" and
+  // inserts the alias itself.
   const completions = useMemo(() => {
     const bySpace = new Map<string, LinkTarget[]>()
     const tags = new Set<string>()
@@ -568,6 +570,9 @@ export function App({ onSignOut }: { onSignOut: () => void }) {
       const target = twins ? stem(inSpace) : stem(n.name)
       const list = bySpace.get(space) ?? []
       list.push({ target, title: n.title, path: n.path })
+      for (const a of n.aliases ?? []) {
+        if (a) list.push({ target: a, title: `${a} → ${n.title}`, path: n.path })
+      }
       bySpace.set(space, list)
     }
     const sortedTags = [...tags].sort((a, b) => a.localeCompare(b))

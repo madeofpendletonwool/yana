@@ -9,19 +9,48 @@ import (
 var now = time.Date(2026, 9, 12, 14, 2, 11, 0, time.UTC)
 
 func TestParseBlock(t *testing.T) {
-	src := "---\nid: 01ABC\ncreated: 2026-09-12T14:02:11Z\norder: 3\ntrusted: true\ntemplate: daily\ncustom: keep me\n# a comment\n---\n# Title\n\nbody\n"
+	src := "---\nid: 01ABC\ncreated: 2026-09-12T14:02:11Z\norder: 3\ntrusted: true\ncustom: keep me\n# a comment\n---\n# Title\n\nbody\n"
 	d := Parse([]byte(src))
 	if !d.HasBlock {
 		t.Fatal("block not detected")
 	}
-	if d.Meta.ID != "01ABC" || !d.Meta.Created.Equal(now) || d.Meta.Order == nil || *d.Meta.Order != 3 || !d.Meta.Trusted || d.Meta.Template != "daily" {
+	if d.Meta.ID != "01ABC" || !d.Meta.Created.Equal(now) || d.Meta.Order == nil || *d.Meta.Order != 3 || !d.Meta.Trusted {
 		t.Fatalf("meta: %+v", d.Meta)
 	}
 	if string(d.Body) != "# Title\n\nbody\n" {
 		t.Fatalf("body: %q", d.Body)
 	}
-	if len(d.Meta.Raw) != 6 || d.Meta.Raw[5][0] != "custom" || d.Meta.Raw[5][1] != "keep me" {
+	if len(d.Meta.Raw) != 5 || d.Meta.Raw[4][0] != "custom" || d.Meta.Raw[4][1] != "keep me" {
 		t.Fatalf("raw: %v", d.Meta.Raw)
+	}
+}
+
+func TestParseAliases(t *testing.T) {
+	cases := []struct {
+		src  string
+		want []string
+	}{
+		{"aliases: [Mom, Margaret]\n", []string{"Mom", "Margaret"}},
+		{"aliases: [Mom]\n", []string{"Mom"}},
+		{"aliases: Mom\n", []string{"Mom"}},
+		{"aliases: [ \"Mom\" , 'Meg' ]\n", []string{"Mom", "Meg"}},
+		{"aliases: [Mom, Mom]\n", []string{"Mom"}},
+		{"aliases: []\n", nil},
+		{"aliases:\n", nil},
+		{"aliases: a rope of, prose\n", nil},
+	}
+	for _, tc := range cases {
+		d := Parse([]byte("---\nid: 01ABC\n" + tc.src + "---\nbody\n"))
+		if len(d.Meta.Aliases) != len(tc.want) {
+			t.Errorf("%q: aliases = %v, want %v", tc.src, d.Meta.Aliases, tc.want)
+			continue
+		}
+		for i, a := range tc.want {
+			if d.Meta.Aliases[i] != a {
+				t.Errorf("%q: aliases = %v, want %v", tc.src, d.Meta.Aliases, tc.want)
+				break
+			}
+		}
 	}
 }
 

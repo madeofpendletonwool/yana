@@ -100,6 +100,51 @@ func TestWikiLinksEmpty(t *testing.T) {
 	}
 }
 
+func TestEmbeds(t *testing.T) {
+	cases := map[string]string{
+		"![[a]]":           `<span class="wikiembed" data-target="a">a</span>`,
+		"![[ a | b ]]":     `<span class="wikiembed" data-target="a">a</span>`,
+		"![[docs/two.md]]": `<span class="wikiembed" data-target="docs/two.md">docs/two.md</span>`,
+		"![[":              "![[",
+		"![[a":             "![[a",
+		"![]":              "![]",
+		"![[a]]]":          `<span class="wikiembed" data-target="a">a</span>]`,
+	}
+	for in, want := range cases {
+		out, err := Markdown([]byte(in))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(out), want) {
+			t.Errorf("%q: want %q in %q", in, want, out)
+		}
+	}
+	// An ordinary image is not an embed, and an embed inside code is
+	// left alone.
+	out, err := Markdown([]byte("![alt](img.png)\n\n```md\n![[fenced]]\n```\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "wikiembed") {
+		t.Errorf("image or fenced embed parsed as embed: %s", out)
+	}
+	if !strings.Contains(string(out), `<img src="img.png" alt="alt">`) {
+		t.Errorf("image lost: %s", out)
+	}
+}
+
+func TestWikiEmbeds(t *testing.T) {
+	body := []byte("Embed ![[meals]] and a link [[meals]] and again ![[meals]].\n\n```md\n![[fenced]]\n```\n")
+	got := WikiEmbeds(body)
+	if len(got) != 1 || got[0] != "meals" {
+		t.Fatalf("WikiEmbeds = %q, want [meals]", got)
+	}
+	links := WikiLinks(body)
+	if len(links) != 1 || links[0] != "meals" {
+		t.Fatalf("WikiLinks = %q, want [meals]", links)
+	}
+}
+
 func TestTaskCheckboxLines(t *testing.T) {
 	src := []byte("# List\n\n- [ ] one\n- [x] two\n  - [ ] nested\n\n> - [X] quoted\n\n```\n- [ ] not a task\n```\n\n1. [ ] numbered\n")
 	out, err := Markdown(src)

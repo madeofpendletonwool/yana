@@ -252,6 +252,7 @@ func (d *Deps) sitePage(ctx context.Context, sn *siteNote, tree *siteTree, byID 
 			return nil, richNeeds{}, err
 		}
 		body = rewriteWikiSpans(body, links, sn, byID)
+		body = rewriteEmbedSpans(body, links, sn, byID)
 	case "html":
 		body = doc.Body
 		if !doc.Meta.Trusted {
@@ -431,6 +432,26 @@ func displaySpace(space, subtree string) string {
 // <span class="wikilink" data-target="…">display</span>. The display
 // text is already HTML-escaped by the renderer.
 var wikiSpanRe = regexp.MustCompile(`(?s)<span class="wikilink" data-target="([^"]*)">(.*?)</span>`)
+
+// embedSpanRe matches the embed spans the renderer emits for ![[…]].
+var embedSpanRe = regexp.MustCompile(`(?s)<span class="wikiembed" data-target="([^"]*)">[^<]*</span>`)
+
+// rewriteEmbedSpans turns embed spans into links between the site's
+// pages. An export flattens an embed to a reference; the body-inline
+// form is the app's read view.
+func rewriteEmbedSpans(body []byte, links []index.OutboundLink, sn *siteNote, byID map[string]*siteNote) []byte {
+	targets := resolvedTargets(links)
+	return embedSpanRe.ReplaceAllFunc(body, func(m []byte) []byte {
+		g := embedSpanRe.FindSubmatch(m)
+		raw := unescapeAttr(string(g[1]))
+		if id, ok := targets[raw]; ok {
+			if target, ok := byID[id]; ok {
+				return []byte(`<a class="wikilink" href="` + hrefBetween(sn.sitePath, target.sitePath) + `" title="` + esc(raw) + `">` + esc(titleOf(target)) + `</a>`)
+			}
+		}
+		return []byte(`<span class="wikilink unresolved" title="unresolved embed">` + esc(raw) + `</span>`)
+	})
+}
 
 // rewriteWikiSpans turns rendered wikilink spans into links between the
 // site's pages. Unresolved targets stay plain text, styled as unresolved.

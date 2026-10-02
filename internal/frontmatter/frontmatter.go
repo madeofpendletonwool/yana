@@ -17,11 +17,13 @@ import (
 
 // Meta holds the keys the application understands.
 type Meta struct {
-	ID       string
-	Created  time.Time
-	Order    *int
-	Trusted  bool
-	Template string
+	ID      string
+	Created time.Time
+	Order   *int
+	Trusted bool
+	// Aliases are the extra names the note answers to, read from an
+	// inline list: `aliases: [Mom, Margaret]`.
+	Aliases []string
 	// Raw is every key/value pair in the block, in file order, including
 	// ones the application does not interpret.
 	Raw [][2]string
@@ -99,11 +101,43 @@ func Parse(content []byte) Doc {
 			}
 		case "trusted":
 			d.Meta.Trusted = v == "true" || v == "yes"
-		case "template":
-			d.Meta.Template = v
+		case "aliases":
+			d.Meta.Aliases = parseList(v)
 		}
 	}
 	return d
+}
+
+// parseList reads the inline list forms the parser can see on one line:
+// a bracketed flow list (`[Mom, Margaret]`) or a single bare value.
+// Quoted items keep their quotes stripped like every other value.
+func parseList(v string) []string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	if strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") {
+		v = v[1 : len(v)-1]
+	} else if strings.Contains(v, ",") {
+		return nil // prose, not a list; do not guess
+	} else {
+		return []string{v}
+	}
+	var out []string
+	seen := map[string]struct{}{}
+	for _, item := range strings.Split(v, ",") {
+		item = strings.TrimSpace(item)
+		item = strings.Trim(item, "\"'")
+		if item == "" {
+			continue
+		}
+		if _, dup := seen[item]; dup {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
 }
 
 // cutLine returns the first line without its "\n", the remainder, and

@@ -13,15 +13,18 @@ import (
 
 // TreeNode is one directory or note in the sidebar tree.
 type TreeNode struct {
-	Type   string   `json:"type"` // "dir" | "note"
-	Name   string   `json:"name"`
-	Path   string   `json:"path"`
-	ID     string   `json:"id,omitempty"`
-	Title  string   `json:"title,omitempty"`
-	Kind   string   `json:"kind,omitempty"`
-	Order  *int     `json:"order,omitempty"`
-	Tags   []string `json:"tags,omitempty"`
-	Public bool     `json:"public,omitempty"` // a public link is live
+	Type  string   `json:"type"` // "dir" | "note"
+	Name  string   `json:"name"`
+	Path  string   `json:"path"`
+	ID    string   `json:"id,omitempty"`
+	Title string   `json:"title,omitempty"`
+	Kind  string   `json:"kind,omitempty"`
+	Order *int     `json:"order,omitempty"`
+	Tags  []string `json:"tags,omitempty"`
+	// Aliases are the names the note answers to from its frontmatter;
+	// completion offers them as link targets.
+	Aliases []string `json:"aliases,omitempty"`
+	Public  bool     `json:"public,omitempty"` // a public link is live
 	// Conflict marks a copy parked beside this note by a collision,
 	// nested under the note it belongs to rather than listed among its
 	// siblings. ConflictOf names that note.
@@ -38,12 +41,12 @@ type SpaceTree struct {
 }
 
 // buildTree nests a flat, path-sorted note list into directories. Notes
-// loose in the root land in a space named "". tags, keyed by note id,
-// ride along on the note rows so the switcher can match on them. A
-// conflict copy is held out of the directory and nested under the note
-// it belongs to, so collisions sit beside their survivor instead of
-// reading as ordinary siblings.
-func buildTree(notes []index.Note, tags map[string][]string) []SpaceTree {
+// loose in the root land in a space named "". tags and aliases, keyed by
+// note id, ride along on the note rows so the switcher and completion
+// can match on them. A conflict copy is held out of the directory and
+// nested under the note it belongs to, so collisions sit beside their
+// survivor instead of reading as ordinary siblings.
+func buildTree(notes []index.Note, tags, aliases map[string][]string) []SpaceTree {
 	type heldOut struct {
 		node  *TreeNode
 		dir   *TreeNode
@@ -83,6 +86,7 @@ func buildTree(notes []index.Note, tags map[string][]string) []SpaceTree {
 				node: &TreeNode{
 					Type: "note", Name: parts[len(parts)-1], Path: n.RelPath,
 					ID: n.ID, Title: n.Title, Kind: n.Kind, Order: n.Order, Tags: tags[n.ID],
+					Aliases:  aliases[n.ID],
 					Conflict: true, ConflictOf: n.ConflictOf,
 				},
 				dir:   cur,
@@ -93,6 +97,7 @@ func buildTree(notes []index.Note, tags map[string][]string) []SpaceTree {
 		node := &TreeNode{
 			Type: "note", Name: parts[len(parts)-1], Path: n.RelPath,
 			ID: n.ID, Title: n.Title, Kind: n.Kind, Order: n.Order, Tags: tags[n.ID],
+			Aliases: aliases[n.ID],
 		}
 		nodes[n.ID] = node
 		cur.Children = append(cur.Children, node)
