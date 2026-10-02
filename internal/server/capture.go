@@ -315,10 +315,12 @@ func (s *Server) handleDailyNote(w http.ResponseWriter, r *http.Request) {
 
 // handleRender turns markdown into the same HTML the note endpoint
 // produces, so the editor's preview matches the read view. The body is
-// the current editor text, which may be ahead of the file on disk.
+// the current editor text, which may be ahead of the file on disk; an
+// optional note id says whose space embeds resolve in.
 func (s *Server) handleRender(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Markdown string `json:"markdown"`
+		Note     string `json:"note"`
 	}
 	limit := s.Root.Limits().MaxNoteSize + 1024
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(&body); err != nil {
@@ -333,6 +335,14 @@ func (s *Server) handleRender(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.fail(w, r, err)
 		return
+	}
+	if body.Note != "" {
+		if _, ok := s.noteAuthz(w, r, body.Note); !ok {
+			return
+		}
+		if n, err := s.DB.GetNote(r.Context(), body.Note); err == nil {
+			html = s.inlineEmbeds(r.Context(), n, html)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"html": string(html)})
 }

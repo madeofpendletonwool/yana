@@ -39,6 +39,16 @@ yet is shown dashed; click it and the note is created. Details (the
 panel button above the note) lists every note that links to the one you
 are reading.
 
+A note can answer to other names: an `aliases: [Mom]` line in its
+frontmatter (the `key: value` block at the top of the file) makes
+`[[Mom]]` find it, and `[[` offers `Mom → its title`.
+
+## Embed one note in another
+
+`![[Note name]]` shows that note's text inside this one, under a small
+heading that links to it. One level only: an embed inside an embedded
+note shows as a link.
+
 ## Add a picture
 
 Drag an image onto the editor, paste one, or use the Image button (on a

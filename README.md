@@ -212,10 +212,11 @@ created: 2026-09-12T14:02:11Z
 ---
 ```
 
-Keys you add are left byte for byte as you wrote them; a short list of
-optional ones (`order`, `trusted`) is read if present. The full contract
-— wikilinks, assets, what scripts and agents may write — is in
-[docs/file-format.md](docs/file-format.md).
+Keys you add are left byte for byte as you wrote them. A short list of
+optional ones (`order`, `trusted`, `aliases`) is read if present —
+`aliases` is how a note answers to other names in `[[links]]`. The full
+contract — wikilinks, embeds, assets, what scripts and agents may write —
+is in [docs/file-format.md](docs/file-format.md).
 
 ### Invariants
 

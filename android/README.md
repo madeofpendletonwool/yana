@@ -193,9 +193,9 @@ tick offline queues as a pending op and the box reads back ticked.
 `_assets/` images load through the app's fetcher with the auth header
 and a disk cache, so the token never enters the page.
 
-When Phase 29 (aliases and embeds) lands, `![[note]]` embeds render
-through the same path; the render side of the engine is shared, so
-nothing new is needed here beyond picking the bundle up.
+ `![[note]]` embeds arrive already inlined in the server's render, so
+ the reader shows them as it shows any note body; an embed the server
+ could not resolve falls back to a wikilink span and is wired like one.
 
 ## The tasks page
 

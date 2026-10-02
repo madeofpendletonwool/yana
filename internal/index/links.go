@@ -11,10 +11,12 @@ import (
 	"github.com/madeofpendletonwool/yana/internal/wikilink"
 )
 
-// OutboundLink is one wikilink of a note, resolved or not.
+// OutboundLink is one wikilink of a note, resolved or not. Kind is
+// "link" for [[targets]] and "embed" for ![[targets]].
 type OutboundLink struct {
 	RawTarget string `json:"raw_target"`
 	ToID      string `json:"to_id,omitempty"`
+	Kind      string `json:"kind,omitempty"`
 	Resolved  bool   `json:"resolved"`
 }
 
@@ -22,6 +24,7 @@ type OutboundLink struct {
 type Backlink struct {
 	Note      Note   `json:"note"`
 	RawTarget string `json:"raw_target"`
+	Kind      string `json:"kind,omitempty"`
 	Context   string `json:"context"`
 }
 
@@ -29,6 +32,15 @@ type Backlink struct {
 type UnresolvedLink struct {
 	Note      Note   `json:"note"`
 	RawTarget string `json:"raw_target"`
+	Kind      string `json:"kind,omitempty"`
+}
+
+// AliasConflict is one alias two or more notes of a space claim. Every
+// link through it stays unresolved until the claim is sorted out.
+type AliasConflict struct {
+	Space string `json:"space"`
+	Alias string `json:"alias"`
+	Notes []Note `json:"notes"`
 }
 
 // InboundLink is one resolved link pointing at a note, for rename
@@ -123,19 +135,45 @@ func RecomputeAllLinks(tx *sql.Tx) error {
 	return nil
 }
 
-// spaceResolver builds the resolver for one space from the notes table as
-// tx sees it.
-func spaceResolver(tx *sql.Tx, space string) (*wikilink.Resolver, error) {
-	rows, err := tx.Query(`SELECT id, rel_path FROM notes WHERE space = ?`, space)
+const resolverQuery = `SELECT n.id, n.rel_path, COALESCE(a.aliases, '') FROM notes n
+	LEFT JOIN (SELECT note_id, GROUP_CONCAT(alias, char(30)) AS aliases FROM aliases GROUP BY note_id) a
+		ON a.note_id = n.id
+	WHERE n.space = ?`
+
+// SpaceResolver builds the resolver for one space outside a write
+// transaction, for read paths that need to resolve targets (the read
+// view inlining embeds, the live preview).
+func (db *DB) SpaceResolver(ctx context.Context, space string) (*wikilink.Resolver, error) {
+	rows, err := db.readers.QueryContext(ctx, resolverQuery, space)
 	if err != nil {
 		return nil, err
 	}
+	return resolverFromRows(space, rows)
+}
+
+// spaceResolver builds the resolver for one space from the notes and
+// aliases tables as tx sees it. Aliases ride along through a group
+// concat with a separator no alias may contain.
+func spaceResolver(tx *sql.Tx, space string) (*wikilink.Resolver, error) {
+	rows, err := tx.Query(resolverQuery, space)
+	if err != nil {
+		return nil, err
+	}
+	return resolverFromRows(space, rows)
+}
+
+func resolverFromRows(space string, rows *sql.Rows) (*wikilink.Resolver, error) {
+	sep := string(rune(30))
 	var refs []wikilink.NoteRef
 	for rows.Next() {
 		var r wikilink.NoteRef
-		if err := rows.Scan(&r.ID, &r.RelPath); err != nil {
+		var joined string
+		if err := rows.Scan(&r.ID, &r.RelPath, &joined); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if joined != "" {
+			r.Aliases = strings.Split(joined, sep)
 		}
 		refs = append(refs, r)
 	}
@@ -143,33 +181,37 @@ func spaceResolver(tx *sql.Tx, space string) (*wikilink.Resolver, error) {
 	return wikilink.NewResolver(space, refs), rows.Err()
 }
 
-// writeLinks replaces the outbound rows of one note. raws is exactly the
-// distinct targets the body spells: [[targets]] for markdown notes,
-// data-wikilink attributes for HTML ones.
+// writeLinks replaces the outbound rows of one note. Links are exactly
+// the distinct targets the body spells: [[targets]] for markdown notes,
+// data-wikilink attributes for HTML ones; markdown embeds (![[targets]])
+// are recorded as their own kind.
 func writeLinks(tx *sql.Tx, fromID, kind string, res *wikilink.Resolver, fromRel, raw string) error {
 	if _, err := tx.Exec(`DELETE FROM links WHERE from_id = ?`, fromID); err != nil {
 		return err
 	}
-	var raws []string
+	write := func(raws []string, linkKind string) error {
+		for _, raw := range raws {
+			r := res.Resolve(raw, fromRel)
+			var toID any
+			resolved := 0
+			if r.OK {
+				toID = r.ToID
+				resolved = 1
+			}
+			if _, err := tx.Exec(`INSERT INTO links (from_id, to_id, raw_target, kind, resolved) VALUES (?, ?, ?, ?, ?)`,
+				fromID, toID, raw, linkKind, resolved); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if kind == "html" {
-		raws = render.HTMLWikiLinks([]byte(raw))
-	} else {
-		raws = render.WikiLinks([]byte(raw))
+		return write(render.HTMLWikiLinks([]byte(raw)), "link")
 	}
-	for _, raw := range raws {
-		r := res.Resolve(raw, fromRel)
-		var toID any
-		resolved := 0
-		if r.OK {
-			toID = r.ToID
-			resolved = 1
-		}
-		if _, err := tx.Exec(`INSERT INTO links (from_id, to_id, raw_target, resolved) VALUES (?, ?, ?, ?)`,
-			fromID, toID, raw, resolved); err != nil {
-			return err
-		}
+	if err := write(render.WikiLinks([]byte(raw)), "link"); err != nil {
+		return err
 	}
-	return nil
+	return write(render.WikiEmbeds([]byte(raw)), "embed")
 }
 
 // rawBodyOfTx returns the note's kind and untransformed body.
@@ -192,7 +234,7 @@ func spaceOfPath(rel string) string {
 // OutboundLinks returns a note's wikilinks for the note payload.
 func (db *DB) OutboundLinks(ctx context.Context, noteID string) ([]OutboundLink, error) {
 	rows, err := db.readers.QueryContext(ctx,
-		`SELECT raw_target, COALESCE(to_id, ''), resolved FROM links WHERE from_id = ? ORDER BY raw_target`, noteID)
+		`SELECT raw_target, COALESCE(to_id, ''), COALESCE(kind, 'link'), resolved FROM links WHERE from_id = ? ORDER BY raw_target`, noteID)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +243,7 @@ func (db *DB) OutboundLinks(ctx context.Context, noteID string) ([]OutboundLink,
 	for rows.Next() {
 		var l OutboundLink
 		var resolved int
-		if err := rows.Scan(&l.RawTarget, &l.ToID, &resolved); err != nil {
+		if err := rows.Scan(&l.RawTarget, &l.ToID, &l.Kind, &resolved); err != nil {
 			return nil, err
 		}
 		l.Resolved = resolved != 0
@@ -216,7 +258,7 @@ func (db *DB) OutboundLinks(ctx context.Context, noteID string) ([]OutboundLink,
 // Backlinks returns the notes linking to noteID, each with the line its
 // link sits on.
 func (db *DB) Backlinks(ctx context.Context, noteID string) ([]Backlink, error) {
-	rows, err := db.readers.QueryContext(ctx, `SELECT `+prefixed(noteColumns, "n.")+`, l.raw_target
+	rows, err := db.readers.QueryContext(ctx, `SELECT `+prefixed(noteColumns, "n.")+`, l.raw_target, COALESCE(l.kind, 'link')
 		FROM links l JOIN notes n ON n.id = l.from_id
 		WHERE l.to_id = ? AND l.resolved = 1 ORDER BY n.rel_path`, noteID)
 	if err != nil {
@@ -226,7 +268,7 @@ func (db *DB) Backlinks(ctx context.Context, noteID string) ([]Backlink, error) 
 	var out []Backlink
 	for rows.Next() {
 		var b Backlink
-		if err := scanNoteInto(rows, &b.Note, &b.RawTarget); err != nil {
+		if err := scanNoteInto(rows, &b.Note, &b.RawTarget, &b.Kind); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
@@ -306,7 +348,7 @@ func linkIndex(s, raw string) int {
 // UnresolvedLinks returns the broken wikilinks of one space, or of every
 // space when space is "".
 func (db *DB) UnresolvedLinks(ctx context.Context, space string) ([]UnresolvedLink, error) {
-	q := `SELECT ` + prefixed(noteColumns, "n.") + `, l.raw_target
+	q := `SELECT ` + prefixed(noteColumns, "n.") + `, l.raw_target, COALESCE(l.kind, 'link')
 		FROM links l JOIN notes n ON n.id = l.from_id
 		WHERE l.resolved = 0`
 	var args []any
@@ -323,12 +365,68 @@ func (db *DB) UnresolvedLinks(ctx context.Context, space string) ([]UnresolvedLi
 	var out []UnresolvedLink
 	for rows.Next() {
 		var u UnresolvedLink
-		if err := scanNoteInto(rows, &u.Note, &u.RawTarget); err != nil {
+		if err := scanNoteInto(rows, &u.Note, &u.RawTarget, &u.Kind); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
 	}
 	return out, rows.Err()
+}
+
+// AliasConflicts returns the aliases two or more notes claim, with the
+// claiming notes, for one space or for every space when space is "".
+func (db *DB) AliasConflicts(ctx context.Context, space string) ([]AliasConflict, error) {
+	q := `SELECT a.space, a.alias FROM aliases a
+		GROUP BY a.space, a.alias HAVING COUNT(DISTINCT a.note_id) > 1`
+	var args []any
+	if space != "" {
+		q = `SELECT a.space, a.alias FROM aliases a WHERE a.space = ?
+		GROUP BY a.space, a.alias HAVING COUNT(DISTINCT a.note_id) > 1`
+		args = append(args, space)
+	}
+	q += ` ORDER BY a.space, a.alias`
+	rows, err := db.readers.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	type key struct{ space, alias string }
+	var keys []key
+	for rows.Next() {
+		var k key
+		if err := rows.Scan(&k.space, &k.alias); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var out []AliasConflict
+	for _, k := range keys {
+		nrows, err := db.readers.QueryContext(ctx, `SELECT `+noteColumns+`
+			FROM notes WHERE id IN (SELECT note_id FROM aliases WHERE space = ? AND alias = ?) ORDER BY rel_path`,
+			k.space, k.alias)
+		if err != nil {
+			return nil, err
+		}
+		c := AliasConflict{Space: k.space, Alias: k.alias}
+		for nrows.Next() {
+			n, err := scanNote(nrows)
+			if err != nil {
+				nrows.Close()
+				return nil, err
+			}
+			c.Notes = append(c.Notes, n)
+		}
+		nrows.Close()
+		if err := nrows.Err(); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
 
 // InboundLinks returns the resolved links pointing at noteID. Rename

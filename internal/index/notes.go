@@ -111,7 +111,67 @@ func UpsertNote(tx *sql.Tx, n Note, body, raw string, tags []string) error {
 			tasks = append(tasks, Task{Line: t.Line, Indent: t.Indent, Text: t.HTML, Done: t.Done, Heading: t.Heading})
 		}
 	}
-	return ReplaceTasksForNote(tx, n.ID, tasks, n.UpdatedAt)
+	if err := ReplaceTasksForNote(tx, n.ID, tasks, n.UpdatedAt); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ReplaceAliases writes the note's alias rows. Aliases live in their own
+// table because they change how the whole space resolves, not just this
+// note's links.
+func ReplaceAliases(tx *sql.Tx, noteID, space string, aliases []string) error {
+	if _, err := tx.Exec(`DELETE FROM aliases WHERE note_id = ?`, noteID); err != nil {
+		return err
+	}
+	for _, a := range aliases {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO aliases (note_id, space, alias) VALUES (?, ?, ?)`,
+			noteID, space, a); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AliasesOfTx returns the note's aliases as they stand in tx, for
+// deciding whether an edit changed the alias list.
+func AliasesOfTx(tx *sql.Tx, noteID string) ([]string, error) {
+	rows, err := tx.Query(`SELECT alias FROM aliases WHERE note_id = ? ORDER BY alias`, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// SameAliasSet reports whether two alias lists hold the same names,
+// order aside.
+func SameAliasSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]struct{}, len(a))
+	for _, s := range a {
+		set[s] = struct{}{}
+	}
+	for _, s := range b {
+		if _, ok := set[s]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // DeleteNotesExcept removes every note whose rel_path is not in keep. It is
@@ -524,4 +584,35 @@ func (db *DB) AllTags(ctx context.Context) (map[string][]string, error) {
 		out[id] = append(out[id], t)
 	}
 	return out, rows.Err()
+}
+
+// AllAliases returns the aliases of every note, keyed by note id, in one
+// query; the tree endpoint stamps them onto its rows for completion.
+func (db *DB) AllAliases(ctx context.Context) (map[string][]string, error) {
+	rows, err := db.readers.QueryContext(ctx, `SELECT note_id, alias FROM aliases ORDER BY note_id, alias`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]string{}
+	for rows.Next() {
+		var id, a string
+		if err := rows.Scan(&id, &a); err != nil {
+			return nil, err
+		}
+		out[id] = append(out[id], a)
+	}
+	return out, rows.Err()
+}
+
+// RawBody returns the untransformed body of one note — the markdown or
+// HTML source links and embeds are extracted from.
+func (db *DB) RawBody(ctx context.Context, id string) (string, error) {
+	var body string
+	err := db.readers.QueryRowContext(ctx,
+		`SELECT COALESCE(b.raw_body, b.body) FROM note_bodies b JOIN notes n ON n.rowid = b.note_rowid WHERE n.id = ?`, id).Scan(&body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return body, err
 }

@@ -554,6 +554,8 @@ export interface FlatNote {
   title: string
   name: string
   tags: string[]
+  /** Names from the note's frontmatter aliases list. */
+  aliases: string[]
   kind?: 'md' | 'html'
   public?: boolean
   /** The note's file name says it is a conflict copy. */
@@ -573,6 +575,7 @@ export function flatten(spaces: SpaceTree[]): FlatNote[] {
         title: n.title || baseOf(n.path),
         name: n.name,
         tags: n.tags ?? [],
+        aliases: n.aliases ?? [],
         kind: n.kind,
         public: n.public,
         conflict: n.conflict || /\.conflict-\d{8}[-T]\d{6}/.test(n.path),

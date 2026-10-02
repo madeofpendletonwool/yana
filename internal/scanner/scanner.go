@@ -104,10 +104,11 @@ func New(root *pathsafe.Root, db *index.DB, opts Options, log *slog.Logger) *Sca
 }
 
 type indexed struct {
-	note index.Note
-	body string // what search reads: markdown text or tag-stripped HTML
-	raw  string // untransformed body: what links are extracted from
-	tags []string
+	note    index.Note
+	body    string // what search reads: markdown text or tag-stripped HTML
+	raw     string // untransformed body: what links are extracted from
+	tags    []string
+	aliases []string // names from the frontmatter aliases list
 }
 
 // Scan walks the whole tree, upserts every note and asset, and retires rows
@@ -141,6 +142,9 @@ func (s *Scanner) Scan(ctx context.Context) (Result, error) {
 		return s.db.Write(ctx, func(tx *sql.Tx) error {
 			for _, it := range b {
 				if err := index.UpsertNote(tx, it.note, it.body, it.raw, it.tags); err != nil {
+					return err
+				}
+				if err := index.ReplaceAliases(tx, it.note.ID, it.note.Space, it.aliases); err != nil {
 					return err
 				}
 			}
@@ -372,7 +376,16 @@ func (s *Scanner) ScanOne(ctx context.Context, rel string) error {
 		}
 		moved := err == nil && old.RelPath != it.note.RelPath
 		fresh := errors.Is(err, index.ErrNotFound)
+		// An edited alias list changes how the whole space resolves; it
+		// is read before the upsert replaces the rows.
+		oldAliases, err := index.AliasesOfTx(tx, it.note.ID)
+		if err != nil {
+			return err
+		}
 		if err := index.UpsertNote(tx, it.note, it.body, it.raw, it.tags); err != nil {
+			return err
+		}
+		if err := index.ReplaceAliases(tx, it.note.ID, it.note.Space, it.aliases); err != nil {
 			return err
 		}
 		// The upsert clears conflict_of; a new file or a new neighbour
@@ -392,6 +405,11 @@ func (s *Scanner) ScanOne(ctx context.Context, rel string) error {
 			return index.RecomputeSpaceLinks(tx, it.note.Space)
 		}
 		if fresh {
+			return index.RecomputeSpaceLinks(tx, it.note.Space)
+		}
+		// A changed alias list also changes how other notes' links
+		// resolve, so the space is redone; otherwise only this note's.
+		if !index.SameAliasSet(oldAliases, it.aliases) {
 			return index.RecomputeSpaceLinks(tx, it.note.Space)
 		}
 		return index.ReplaceLinksForNote(tx, it.note.ID)
@@ -642,7 +660,7 @@ func (s *Scanner) indexFile(ctx context.Context, abs, rel, space, kind string, i
 	if kind == "md" {
 		tags = render.Tags(body)
 	}
-	return indexed{note: note, body: bodyText, raw: raw, tags: tags}, assigned, false, nil
+	return indexed{note: note, body: bodyText, raw: raw, tags: tags, aliases: fm.Meta.Aliases}, assigned, false, nil
 }
 
 // ReassignID gives the file at rel a fresh id on disk. The watcher uses it

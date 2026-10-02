@@ -694,6 +694,22 @@ details.callout:not([open]) > summary.callout-title { margin-bottom: 0; }
 .wikilink.unresolved { color: var(--ink-3); border-bottom: 1px dashed var(--ink-3); cursor: pointer; }
 .wikilink.unresolved:hover, .wikilink.unresolved:focus-visible { color: var(--accent-ink); border-bottom-color: var(--accent); }
 .wikilink.unresolved.creating { opacity: 0.5; pointer-events: none; }
+/* An embed the server has not inlined (a raw render, an export source):
+   it reads as a reference to follow. */
+.wikiembed { color: var(--accent-ink); border-bottom: 1px dashed var(--accent); }
+
+/* An inlined ![[embed]]: the target's body under a small header. */
+.markdown .embed {
+  margin: 0 0 0.9em; padding: 0 0 0 14px;
+  border-left: 2px solid var(--line-2);
+}
+.markdown .embed-head {
+  font-size: 12.5px; font-weight: 600; margin: 0 0 6px;
+  color: var(--ink-2); letter-spacing: 0.01em;
+}
+.markdown .embed-body > :first-child { margin-top: 0; }
+.markdown .embed-body > :last-child { margin-bottom: 0; }
+.markdown .embed .embed { margin-left: 0; }
 
 .chroma .k, .chroma .kd, .chroma .kn, .chroma .kr, .chroma .kt { color: var(--code-kw); }
 .chroma .s, .chroma .s1, .chroma .s2, .chroma .sb { color: var(--code-str); }

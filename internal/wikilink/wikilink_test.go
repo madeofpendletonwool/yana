@@ -68,6 +68,40 @@ func TestResolveLooseNotes(t *testing.T) {
 	}
 }
 
+func TestResolveAlias(t *testing.T) {
+	r := NewResolver("main", []NoteRef{
+		{ID: "home", RelPath: "main/home.md"},
+		{ID: "margaret", RelPath: "main/people/margaret.md", Aliases: []string{"Mom", "Margaret"}},
+		{ID: "a", RelPath: "main/x/a.md", Aliases: []string{"Mom"}},
+		{ID: "b", RelPath: "main/y/b.md", Aliases: []string{"Mom"}},
+		{ID: "dup", RelPath: "main/z/dup.md", Aliases: []string{"Mom", "Mom"}},
+	})
+	// Step 4 resolves a unique alias.
+	if got := r.Resolve("Margaret", "main/home.md"); !got.OK || got.ToID != "margaret" || got.Rule != RuleAlias {
+		t.Fatalf("alias match: %+v", got)
+	}
+	// A filename that exists wins before the alias step.
+	if got := r.Resolve("margaret", "main/home.md"); !got.OK || got.Rule != RuleFilename {
+		t.Fatalf("filename should win over alias: %+v", got)
+	}
+	// Two notes claiming one alias: unresolved.
+	if got := r.Resolve("Mom", "main/home.md"); got.OK {
+		t.Fatalf("conflicted alias resolved: %+v", got)
+	}
+	// A path-shaped target never hits aliases.
+	if got := r.Resolve("people/Margaret", "main/home.md"); got.OK {
+		t.Fatalf("path-shaped alias match: %+v", got)
+	}
+	// One claimant alone resolves.
+	r2 := NewResolver("main", []NoteRef{
+		{ID: "home", RelPath: "main/home.md"},
+		{ID: "m", RelPath: "main/people/margaret.md", Aliases: []string{"Mom", "Mom"}},
+	})
+	if got := r2.Resolve("Mom", "main/home.md"); !got.OK || got.ToID != "m" || got.Rule != RuleAlias {
+		t.Fatalf("alias after dedupe: %+v", got)
+	}
+}
+
 func TestRewriteTarget(t *testing.T) {
 	cases := []struct {
 		name string

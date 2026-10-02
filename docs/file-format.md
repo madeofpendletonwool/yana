@@ -64,10 +64,11 @@ Optional keys the server understands:
 |---|---|---|
 | `order` | int | Sidebar sort within a folder |
 | `trusted` | bool | HTML notes only; render without the sanitizer (still sandboxed — see [html-notes.md](html-notes.md)) |
-| `template` | string | Reserved |
+| `aliases` | list of strings | Extra names the note answers to; `[[Mom]]` resolves to the note (see [links.md](links.md)) |
 
-Do not add keys beyond these for the application's benefit. Keys you add for
-your own reasons are carried through untouched.
+`aliases` is read as an inline list, `aliases: [Mom, Margaret]`, or a
+single bare name. Do not add keys beyond these for the application's
+benefit. Keys you add for your own reasons are carried through untouched.
 
 ### Duplicate ids
 
@@ -97,10 +98,12 @@ dashes. Raw HTML inside a markdown note is dropped from the rendered output.
 ```
 [[Meeting notes]]
 [[projects/roadmap|the roadmap]]
+![[Meeting notes]]
 ```
 
 `[[target]]` and `[[target|display text]]` are parsed and resolve to notes
-in the same space. Resolution, backlinks, rename propagation, and the
+in the same space; `![[target]]` embeds the target's body in the read
+view. Resolution, aliases, backlinks, embeds, rename propagation, and the
 unresolved-link report are covered in [links.md](links.md). HTML notes use
 the same resolution through a `data-wikilink` attribute:
 

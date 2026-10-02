@@ -13,6 +13,9 @@ export interface TreeNode {
   order?: number
   /** The note's inline #tags, folded to lower case. */
   tags?: string[]
+  /** Names from the note's frontmatter aliases list; a [[link]] by one
+   * of them resolves to the note. */
+  aliases?: string[]
   /** A public link to the note is live. */
   public?: boolean
   /** This row is a conflict copy nested under the note it belongs to. */
@@ -31,18 +34,29 @@ export interface SpaceTree {
 export interface LinkInfo {
   raw_target: string
   to_id?: string
+  /** 'link' or 'embed'; links behave the same either way. */
+  kind?: string
   resolved: boolean
 }
 
 export interface Backlink {
   note: Note
   raw_target: string
+  kind?: string
   context: string
 }
 
 export interface UnresolvedLink {
   note: Note
   raw_target: string
+  kind?: string
+}
+
+/** One alias two notes claim: every link through it stays unresolved. */
+export interface AliasConflict {
+  space: string
+  alias: string
+  notes: Note[]
 }
 
 export interface Note {
@@ -511,7 +525,7 @@ export const api = {
   backlinks: (id: string) =>
     get<{ backlinks: Backlink[] }>(`/api/notes/${encodeURIComponent(id)}/backlinks`),
   unresolved: (space?: string) =>
-    get<{ unresolved: UnresolvedLink[] }>(
+    get<{ unresolved: UnresolvedLink[]; alias_conflicts: AliasConflict[] }>(
       '/api/links/unresolved' + (space ? `?space=${encodeURIComponent(space)}` : ''),
     ),
   createNote: (path: string, content?: string) =>
@@ -589,7 +603,8 @@ export const api = {
     post<TemplateExpanded>(`/api/templates/${encodeURIComponent(id)}/expand`, input),
   /** The starter note: made in the space when it is not there, found otherwise. */
   guide: (space: string) => post<{ id?: string; path: string; created: boolean }>('/api/guide', { space }),
-  render: (markdown: string) => post<{ html: string }>('/api/render', { markdown }),
+  render: (markdown: string, note?: string) =>
+    post<{ html: string }>('/api/render', { markdown, note }),
   noteView: (id: string) =>
     get<{ url: string; expires_at: string }>(`/api/notes/${encodeURIComponent(id)}/view`),
   saveSource: (id: string, source: string, baseHash: string) =>

@@ -110,7 +110,8 @@ func conventionsDoc(space string, folders []string) []byte {
 	b.WriteString("- A note is one markdown file ending in `.md`, in any folder of this space.\n" +
 		"- Do not write an `id` or `created` key. The server assigns both the first time it\n" +
 		"  sees a file and never changes them. Other frontmatter keys you add are carried\n" +
-		"  through untouched.\n" +
+		"  through untouched; the optional ones the server reads are `order`, `trusted` and\n" +
+		"  `aliases: [Name, Nickname]`.\n" +
 		"- Write files completely and finish quickly, or write to a temporary name and\n" +
 		"  `mv` into place; a file still being written is picked up after it settles.\n" +
 		"- Files and folders starting with a dot are ignored.\n" +
@@ -120,6 +121,9 @@ func conventionsDoc(space string, folders []string) []byte {
 	b.WriteString("## Links\n\n")
 	b.WriteString("- `[[Note title]]` links a note in this space by title; `[[folder/note|display text]]`\n" +
 		"  links by path and shows its own display text.\n" +
+		"- A note's `aliases: [Mom]` frontmatter makes `[[Mom]]` resolve to it; a name two\n" +
+		"  notes claim stays unresolved.\n" +
+		"- `![[Note title]]` embeds the note's body in the read view.\n" +
 		"- Links resolve within this space only. Every note lists its backlinks.\n" +
 		"- Moving or renaming a note rewrites every inbound link, so link freely and\n" +
 		"  rename without fear.\n\n")

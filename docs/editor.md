@@ -512,7 +512,9 @@ opens `[[` and the note list. **Tag** inserts `#` and the tags in use.
 
 Typing `[[` offers the notes of the note's space (a link resolves inside
 its space); picking one inserts its file name, or its path from the space
-root when two notes share a file name, and closes the brackets. Typing
+root when two notes share a file name, and closes the brackets. Aliases
+from the notes' frontmatter are offered too, shown as `Mom → Margaret`,
+and insert the alias. Typing
 `#` at the start of a word offers the tags already in use. Escape closes
 the list without leaving the editor; Mod-Space opens it by hand.
 

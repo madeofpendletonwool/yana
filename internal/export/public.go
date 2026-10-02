@@ -66,6 +66,14 @@ func (d *Deps) PublicPage(ctx context.Context, n index.Note, refs PublicRefs) ([
 			}
 			return []byte(`<span class="wikilink">` + display + `</span>`)
 		})
+		body = embedSpanRe.ReplaceAllFunc(body, func(m []byte) []byte {
+			g := embedSpanRe.FindSubmatch(m)
+			raw := unescapeAttr(string(g[1]))
+			if u := noteURL(raw); u != "" {
+				return []byte(`<a class="wikilink" href="` + esc(u) + `">` + esc(raw) + `</a>`)
+			}
+			return []byte(`<span class="wikilink">` + esc(raw) + `</span>`)
+		})
 	case "html":
 		body = render.SanitizeHTML(doc.Body)
 		body = wikilinkIDAttrRe.ReplaceAll(body, nil)

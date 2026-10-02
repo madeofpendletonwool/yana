@@ -1,7 +1,8 @@
 # Links
 
 Wikilinks turn a folder of notes into a wiki. `[[target]]` links to a note,
-`[[target|display text]]` links and shows something else.
+`[[target|display text]]` links and shows something else, and `![[target]]`
+embeds a note's body inside another (see [Embeds](#embeds)).
 
 ```
 [[Meeting notes]]
@@ -23,7 +24,11 @@ another one). The order:
 3. **Unique filename.** A bare filename that matches exactly one note in
    the space resolves to it; two notes with the same filename leave the
    link unresolved rather than guessing.
-4. Otherwise the link is **unresolved**.
+4. **Unique alias.** A bare name that exactly one note in the space claims
+   in its `aliases` list resolves to it; two notes claiming the same alias
+   leave the link unresolved, and the report page names both (see
+   [Unresolved links](#unresolved-links)).
+5. Otherwise the link is **unresolved**.
 
 A target without an extension is read as `.md`. HTML notes need their
 extension spelled out: `[[dashboard.html]]`.
@@ -32,13 +37,47 @@ Resolution runs when the index runs, over the note bodies the index holds.
 The `links` table is derived data like everything else in the index
 database: delete it and rescan, and it comes back.
 
+## Aliases
+
+A note answers to more names than its path. The frontmatter holds them:
+
+```yaml
+---
+aliases: [Mom, Margaret]
+```
+
+The inline list is the form the server reads, in the note's own frontmatter
+([file-format.md](file-format.md)). An alias is matched exactly as
+written, after the three path steps, so a real filename always wins over
+an alias and a path-shaped target never hits one. `[[` completion offers
+aliases as `Mom → Margaret` and inserts the alias; the rendered link shows
+the alias text as typed.
+
+Renaming or moving a note keeps its aliases — they travel with the note's
+id — and a link written through an alias is left as written: it still
+resolves. Editing the alias list re-resolves the space's links on the next
+scan.
+
+## Embeds
+
+`![[target]]` renders the target's body inline in the read view, once,
+under a small header linking to the note. This is the whole of
+transclusion: no recursion (an embed inside an embedded body renders as a
+link), no partial selectors, no headings-only form. A note embedding
+itself renders a link. An unresolved embed is the create affordance, like
+an unresolved link. Embeds count as references: they appear in backlinks,
+and a move rewrites their targets like any other link. In exports and
+public pages an embed flattens to a link to the note.
+
 ## Unresolved links
 
 An unresolved link renders as a create affordance: click it and the note is
 created at the path the target implies (relative to the linking note, or at
 the space root for root-style targets), then opens. The report page lists
 every unresolved link per space — `Unresolved links` at the bottom of the
-sidebar, or `GET /api/links/unresolved?space=name`.
+sidebar, or `GET /api/links/unresolved?space=name` — and, under it, every
+alias two notes claim at once; each row names both notes so the duplicate
+can be sorted out.
 
 ## Backlinks
 
@@ -62,7 +101,9 @@ half-renamed. A folder cannot move inside itself.
 ## Moving and renaming notes
 
 `POST /api/notes/{id}/move` with `{"path": "new/path.md"}` moves a note and
-rewrites every inbound wikilink to keep pointing at it. Each rewrite is a
+rewrites every inbound wikilink to keep pointing at it, keeping its
+aliases: a link that resolved through an alias is left as written, because
+the alias still resolves. Each rewrite is a
 CRDT edit with author `filesystem`, so anyone with a linking note open sees
 the new target live, and the files on disk follow through the ordinary
 write-back. The style of each link is kept: relative links stay relative,

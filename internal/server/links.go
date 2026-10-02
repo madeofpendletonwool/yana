@@ -98,7 +98,42 @@ func (s *Server) handleUnresolvedLinks(w http.ResponseWriter, r *http.Request) {
 	if un == nil {
 		un = []index.UnresolvedLink{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"unresolved": un})
+	conflicts, err := s.DB.AliasConflicts(r.Context(), space)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if conflicts == nil {
+		conflicts = []index.AliasConflict{}
+	}
+	// Alias conflicts name notes; keep them inside what the caller sees.
+	conflicts = s.visibleConflicts(r, conflicts)
+	writeJSON(w, http.StatusOK, map[string]any{"unresolved": un, "alias_conflicts": conflicts})
+}
+
+// visibleConflicts drops alias conflicts in spaces the caller cannot see.
+func (s *Server) visibleConflicts(r *http.Request, conflicts []index.AliasConflict) []index.AliasConflict {
+	if s.open() {
+		return conflicts
+	}
+	member, isAll, err := s.Auth.MemberSpaces(r.Context(), s.ident(r))
+	if err != nil {
+		return nil
+	}
+	if isAll {
+		return conflicts
+	}
+	allowed := make(map[string]bool, len(member))
+	for _, sp := range member {
+		allowed[sp] = true
+	}
+	out := conflicts[:0]
+	for _, c := range conflicts {
+		if allowed[c.Space] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {

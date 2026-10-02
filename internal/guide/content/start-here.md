@@ -29,6 +29,18 @@ How to make one:
 
 Every note that links here is listed under **Backlinks** in Details (the panel button in the bar above the note). Rename or move a note and every link to it is rewritten.
 
+A note can answer to other names. Put an `aliases` list in its frontmatter — the block of `key: value` lines at the top of the file — and a link by any of those names finds it:
+
+```
+---
+aliases: [Mom, Margaret]
+---
+```
+
+Then `[[Mom]]` links to that note, and typing `[[` offers `Mom → Margaret`. A name two notes claim stays unresolved until one gives it up.
+
+An exclamation mark in front embeds a note's body inside another: `![[A linked note]]` shows that note's text right here in the read view. One level only — an embed inside an embedded note shows as a link.
+
 ## Pictures and files
 
 An image sits in an `_assets` folder beside the note and is shown with a line like `![a caption](_assets/yana.png)`:
